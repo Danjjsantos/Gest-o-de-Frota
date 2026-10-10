@@ -1,0 +1,6 @@
+{
+  "name": "Gestão Frotas - Sistema de Controle",
+  "description": "Plataforma completa de gestão de frotas, ordens de serviços corretivos, controle de documentos (CRLV, CIV, CIPP, Tacógrafo), perfis de usuários e alertas de vencimento.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
