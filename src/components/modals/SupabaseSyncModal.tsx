@@ -102,8 +102,8 @@ export const SupabaseSyncModal: React.FC<SupabaseSyncModalProps> = ({ isOpen, on
         res.errors.forEach(err => addLog(`Aviso: ${err}`));
       }
 
-      addLog(`Sincronização concluída! Gravados com sucesso: ${res.vehiclesCount} veículos, ${res.ordersCount} OSs, ${res.usersCount} usuários.`);
-      setSyncSuccessMessage(`Dados enviados com sucesso para o Supabase! (${res.vehiclesCount} veículos, ${res.ordersCount} OSs, ${res.usersCount} usuários)`);
+      addLog(`Sincronização concluída! Gravados com sucesso: ${res.vehiclesCount} veículos, ${res.ordersCount} OSs, ${res.usersCount} usuários, ${res.documentsCount} documentos, ${res.attachmentsCount} anexos, ${res.equipmentsCount} equipamentos.`);
+      setSyncSuccessMessage(`Dados enviados com sucesso para o Supabase! (${res.vehiclesCount} veículos, ${res.ordersCount} OSs, ${res.usersCount} usuários, ${res.documentsCount} documentos, ${res.equipmentsCount} equipamentos)`);
       
       // Refresh table count
       await loadHealthStatus();

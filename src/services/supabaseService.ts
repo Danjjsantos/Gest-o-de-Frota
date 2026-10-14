@@ -269,6 +269,7 @@ export function toFrontendUser(row: any): User {
     id: row.id,
     name: row.name,
     email: row.email,
+    password: row.password || undefined,
     role: row.role,
     atribuicoes: Array.isArray(row.atribuicoes) ? row.atribuicoes : [],
     phone: row.phone || undefined,
@@ -276,6 +277,82 @@ export function toFrontendUser(row: any): User {
     cnhCategory: row.cnh_category || undefined,
     avatarColor: row.avatar_color || '#3b82f6',
     createdAt: formatIsoToBrDate(row.created_at, '14/07/2026')
+  };
+}
+
+// Convert Document to vehicle_documents row
+export function toDatabaseVehicleDocument(vehicleId: string, docType: string, doc: any): Record<string, any> | null {
+  if (!doc || !doc.expiryDate) return null;
+  return {
+    id: `doc-${vehicleId}-${docType}`.toLowerCase().replace(/[^a-z0-9_-]/g, '-'),
+    vehicle_id: vehicleId,
+    doc_type: docType,
+    number: doc.number || null,
+    issue_date: parseDateToIso(doc.issueDate),
+    expiry_date: parseDateToIso(doc.expiryDate) || doc.expiryDate,
+    status: doc.status || 'valid',
+    file_url: doc.fileUrl || null,
+    file_name: doc.fileName || null,
+    file_type: doc.fileType || null,
+    file_size: parseNumber(doc.fileSize),
+    notes: doc.notes || null,
+    uploaded_at: parseTimestampToIso(doc.uploadedAt) || new Date().toISOString()
+  };
+}
+
+// Convert Attachment to vehicle_attachments row
+export function toDatabaseVehicleAttachment(vehicleId: string, att: any): Record<string, any> {
+  return {
+    id: att.id || `att-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+    vehicle_id: vehicleId,
+    name: att.name || 'Anexo',
+    data_url: att.dataUrl || att.fileUrl || '',
+    file_type: att.fileType || 'application/pdf',
+    file_size: parseNumber(att.fileSize, 0) || 0,
+    category: att.category || 'Outro',
+    number: att.number || null,
+    issue_date: parseDateToIso(att.issueDate),
+    expiry_date: parseDateToIso(att.expiryDate),
+    notes: att.notes || null,
+    uploaded_by: att.uploadedBy || null,
+    uploaded_at: parseTimestampToIso(att.uploadedAt) || new Date().toISOString()
+  };
+}
+
+// Convert Equipment to vehicle_equipments row
+export function toDatabaseVehicleEquipment(vehicleId: string, eq: any): Record<string, any> {
+  const calibDate = parseDateToIso(eq.calibrationDate);
+  const nextCalib = parseDateToIso(eq.nextCalibrationDate || eq.calibrationDate) || new Date().toISOString().split('T')[0];
+  return {
+    id: eq.id || `eq-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+    vehicle_id: vehicleId,
+    description: eq.description || 'Equipamento',
+    company: eq.company || null,
+    tag: eq.tag || null,
+    certificate_number: eq.certificateNumber || null,
+    calibration_date: calibDate,
+    next_calibration_date: nextCalib,
+    status: eq.status || 'valid',
+    notes: eq.notes || null,
+    file_url: eq.fileUrl || eq.dataUrl || null,
+    file_name: eq.fileName || null,
+    file_type: eq.fileType || null,
+    file_size: parseNumber(eq.fileSize),
+    uploaded_by: eq.uploadedBy || null,
+    uploaded_at: parseTimestampToIso(eq.uploadedAt) || new Date().toISOString()
+  };
+}
+
+// Convert OS Attachment to service_order_attachments row
+export function toDatabaseServiceOrderAttachment(serviceOrderId: string, att: any): Record<string, any> {
+  return {
+    id: att.id || `so-att-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+    service_order_id: serviceOrderId,
+    name: att.name || 'Anexo OS',
+    data_url: att.dataUrl || att.fileUrl || '',
+    file_type: att.fileType || 'image/jpeg',
+    file_size: parseNumber(att.fileSize, 0) || 0,
+    uploaded_at: parseTimestampToIso(att.uploadedAt) || new Date().toISOString()
   };
 }
 
@@ -407,6 +484,7 @@ export class SupabaseService {
 
   /**
    * Carrega todos os dados do Supabase (Vice-Versa: Banco -> Aplicação)
+   * Carrega os dados mestres e todas as tabelas relacionais dedicadas
    */
   static async fetchAll(): Promise<{
     vehicles: Vehicle[];
@@ -441,9 +519,134 @@ export class SupabaseService {
       console.warn('Aviso ao buscar notificações do Supabase:', notifErr.message);
     }
 
+    // 5. Fetch Subtabelas Relacionais (Documentos, Anexos, Equipamentos)
+    let allDocs: any[] = [];
+    let allVehAtts: any[] = [];
+    let allEqs: any[] = [];
+    let allSoAtts: any[] = [];
+
+    try {
+      const res = await client.from('vehicle_documents').select('*');
+      if (Array.isArray(res.data)) allDocs = res.data;
+    } catch {}
+
+    try {
+      const res = await client.from('vehicle_attachments').select('*');
+      if (Array.isArray(res.data)) allVehAtts = res.data;
+    } catch {}
+
+    try {
+      const res = await client.from('vehicle_equipments').select('*');
+      if (Array.isArray(res.data)) allEqs = res.data;
+    } catch {}
+
+    try {
+      const res = await client.from('service_order_attachments').select('*');
+      if (Array.isArray(res.data)) allSoAtts = res.data;
+    } catch {}
+
     const mappedUsers: User[] = (usersData || []).map(toFrontendUser);
-    const mappedVehicles: Vehicle[] = (vehiclesData || []).map(toFrontendVehicle);
-    const mappedServiceOrders: ServiceOrder[] = (soData || []).map(toFrontendServiceOrder);
+
+    // Mapear veículos e mesclar registros das tabelas filhas caso existam
+    const mappedVehicles: Vehicle[] = (vehiclesData || []).map(row => {
+      const v = toFrontendVehicle(row);
+
+      // Mesclar documentos da tabela vehicle_documents
+      const vehDocs = allDocs.filter((d: any) => d.vehicle_id === v.id);
+      if (vehDocs.length > 0) {
+        const docsObj: any = { ...(v.documents || {}) };
+        vehDocs.forEach((d: any) => {
+          if (d.doc_type) {
+            docsObj[d.doc_type] = {
+              type: d.doc_type,
+              number: d.number || undefined,
+              issueDate: d.issue_date || undefined,
+              expiryDate: d.expiry_date || '',
+              status: d.status || 'valid',
+              fileUrl: d.file_url || undefined,
+              fileName: d.file_name || undefined,
+              fileType: d.file_type || undefined,
+              fileSize: d.file_size || undefined,
+              notes: d.notes || undefined,
+              uploadedAt: d.uploaded_at ? formatIsoToBrDate(d.uploaded_at) : undefined
+            };
+          }
+        });
+        v.documents = docsObj;
+      }
+
+      // Mesclar anexos da tabela vehicle_attachments
+      const vehAtts = allVehAtts.filter((a: any) => a.vehicle_id === v.id);
+      if (vehAtts.length > 0) {
+        const existingIds = new Set((v.attachments || []).map(a => a.id));
+        const extraAtts = vehAtts
+          .filter((a: any) => !existingIds.has(a.id))
+          .map((a: any) => ({
+            id: a.id,
+            name: a.name,
+            dataUrl: a.data_url,
+            fileType: a.file_type,
+            fileSize: a.file_size || 0,
+            category: a.category || 'Outro',
+            number: a.number || undefined,
+            issueDate: a.issue_date || undefined,
+            expiryDate: a.expiry_date || undefined,
+            notes: a.notes || undefined,
+            uploadedBy: a.uploaded_by || 'Sistema',
+            uploadedAt: a.uploaded_at ? formatIsoToBrDate(a.uploaded_at) : '15/07/2026'
+          }));
+        v.attachments = [...(v.attachments || []), ...extraAtts];
+      }
+
+      // Mesclar equipamentos da tabela vehicle_equipments
+      const vehEqs = allEqs.filter((e: any) => e.vehicle_id === v.id);
+      if (vehEqs.length > 0) {
+        const existingIds = new Set((v.equipments || []).map(e => e.id));
+        const extraEqs = vehEqs
+          .filter((e: any) => !existingIds.has(e.id))
+          .map((e: any) => ({
+            id: e.id,
+            description: e.description,
+            company: e.company || undefined,
+            tag: e.tag || undefined,
+            certificateNumber: e.certificate_number || undefined,
+            calibrationDate: e.calibration_date || undefined,
+            nextCalibrationDate: e.next_calibration_date,
+            status: e.status || 'valid',
+            notes: e.notes || undefined,
+            fileUrl: e.file_url || undefined,
+            fileName: e.file_name || undefined,
+            fileType: e.file_type || undefined,
+            fileSize: e.file_size || undefined,
+            uploadedBy: e.uploaded_by || 'Sistema',
+            uploadedAt: e.uploaded_at ? formatIsoToBrDate(e.uploaded_at) : undefined
+          }));
+        v.equipments = [...(v.equipments || []), ...extraEqs];
+      }
+
+      return v;
+    });
+
+    // Mapear ordens de serviço e mesclar anexos da tabela service_order_attachments
+    const mappedServiceOrders: ServiceOrder[] = (soData || []).map(row => {
+      const so = toFrontendServiceOrder(row);
+      const osAtts = allSoAtts.filter((a: any) => a.service_order_id === so.id);
+      if (osAtts.length > 0) {
+        const existingIds = new Set((so.attachments || []).map(a => a.id));
+        const extraAtts = osAtts
+          .filter((a: any) => !existingIds.has(a.id))
+          .map((a: any) => ({
+            id: a.id,
+            name: a.name,
+            dataUrl: a.data_url,
+            fileType: a.file_type,
+            fileSize: a.file_size || 0,
+            uploadedAt: a.uploaded_at ? formatIsoToBrDate(a.uploaded_at) : undefined
+          }));
+        so.attachments = [...(so.attachments || []), ...extraAtts];
+      }
+      return so;
+    });
 
     const mappedNotifications: SystemNotification[] = (notifData || []).map((row: any) => ({
       id: row.id,
@@ -472,7 +675,7 @@ export class SupabaseService {
   }
 
   /**
-   * Envia todos os dados locais para o Supabase (Upsert em lote limpo e validado)
+   * Envia todos os dados locais para o Supabase (Upsert em lote limpo em todas as tabelas)
    */
   static async pushAll(
     vehicles: Vehicle[],
@@ -484,6 +687,9 @@ export class SupabaseService {
     vehiclesCount: number;
     ordersCount: number;
     notifsCount: number;
+    documentsCount: number;
+    attachmentsCount: number;
+    equipmentsCount: number;
     errors: string[];
   }> {
     const client = getSupabaseClient();
@@ -494,6 +700,9 @@ export class SupabaseService {
     let vehiclesCount = 0;
     let ordersCount = 0;
     let notifsCount = 0;
+    let documentsCount = 0;
+    let attachmentsCount = 0;
+    let equipmentsCount = 0;
 
     // 1. Upsert Users (Garante que usuários responsáveis existam)
     try {
@@ -511,7 +720,7 @@ export class SupabaseService {
       errors.push(`Usuários erro: ${err.message}`);
     }
 
-    // 2. Upsert Vehicles (Garante que veículos existam para as foreign keys das OSs)
+    // 2. Upsert Vehicles (Garante que veículos existam para as foreign keys das OSs e subtabelas)
     try {
       const vehicleRows = vehicles.map(toDatabaseVehicle);
       if (vehicleRows.length > 0) {
@@ -527,7 +736,76 @@ export class SupabaseService {
       errors.push(`Veículos erro: ${err.message}`);
     }
 
-    // 3. Upsert Service Orders (Após veículos estarem salvos)
+    // 3. Upsert Vehicle Documents
+    try {
+      const docRows: any[] = [];
+      vehicles.forEach(v => {
+        if (v.documents) {
+          Object.entries(v.documents).forEach(([docType, doc]) => {
+            if (doc && (doc as any).expiryDate) {
+              const row = toDatabaseVehicleDocument(v.id, docType, doc);
+              if (row) docRows.push(row);
+            }
+          });
+        }
+      });
+      if (docRows.length > 0) {
+        const { error: docErr } = await client.from('vehicle_documents').upsert(docRows, { onConflict: 'id' });
+        if (docErr && docErr.code !== 'PGRST205') {
+          errors.push(`Documentos: ${docErr.message}`);
+        } else {
+          documentsCount = docRows.length;
+        }
+      }
+    } catch (err: any) {
+      errors.push(`Documentos erro: ${err.message}`);
+    }
+
+    // 4. Upsert Vehicle Attachments
+    try {
+      const attRows: any[] = [];
+      vehicles.forEach(v => {
+        if (Array.isArray(v.attachments)) {
+          v.attachments.forEach(att => {
+            attRows.push(toDatabaseVehicleAttachment(v.id, att));
+          });
+        }
+      });
+      if (attRows.length > 0) {
+        const { error: attErr } = await client.from('vehicle_attachments').upsert(attRows, { onConflict: 'id' });
+        if (attErr && attErr.code !== 'PGRST205') {
+          errors.push(`Anexos de veículos: ${attErr.message}`);
+        } else {
+          attachmentsCount = attRows.length;
+        }
+      }
+    } catch (err: any) {
+      errors.push(`Anexos veículos erro: ${err.message}`);
+    }
+
+    // 5. Upsert Vehicle Equipments
+    try {
+      const eqRows: any[] = [];
+      vehicles.forEach(v => {
+        if (Array.isArray(v.equipments)) {
+          v.equipments.forEach(eq => {
+            eqRows.push(toDatabaseVehicleEquipment(v.id, eq));
+          });
+        }
+      });
+      if (eqRows.length > 0) {
+        const { error: eqErr } = await client.from('vehicle_equipments').upsert(eqRows, { onConflict: 'id' });
+        if (eqErr && eqErr.code !== 'PGRST205') {
+          errors.push(`Equipamentos: ${eqErr.message}`);
+        } else {
+          equipmentsCount = eqRows.length;
+        }
+      }
+    } catch (err: any) {
+      errors.push(`Equipamentos erro: ${err.message}`);
+    }
+
+    // 6. Upsert Service Orders (Após veículos estarem salvos)
     try {
       const orderRows = serviceOrders.map(toDatabaseServiceOrder);
       if (orderRows.length > 0) {
@@ -543,7 +821,24 @@ export class SupabaseService {
       errors.push(`Ordens de Serviço erro: ${err.message}`);
     }
 
-    // 4. Upsert Notifications
+    // 7. Upsert Service Order Attachments
+    try {
+      const soAttRows: any[] = [];
+      serviceOrders.forEach(so => {
+        if (Array.isArray(so.attachments)) {
+          so.attachments.forEach(att => {
+            soAttRows.push(toDatabaseServiceOrderAttachment(so.id, att));
+          });
+        }
+      });
+      if (soAttRows.length > 0) {
+        await client.from('service_order_attachments').upsert(soAttRows, { onConflict: 'id' });
+      }
+    } catch (err: any) {
+      console.debug('Service order attachments push notice:', err?.message);
+    }
+
+    // 8. Upsert Notifications
     try {
       const notifRows = notifications.map(n => ({
         id: n.id,
@@ -580,12 +875,15 @@ export class SupabaseService {
       vehiclesCount,
       ordersCount,
       notifsCount,
+      documentsCount,
+      attachmentsCount,
+      equipmentsCount,
       errors
     };
   }
 
   /**
-   * Salvar ou atualizar veículo no Supabase (com todos os documentos e anexos)
+   * Salvar ou atualizar veículo no Supabase (com todos os documentos, anexos e equipamentos)
    */
   static async upsertVehicle(v: Vehicle): Promise<boolean> {
     const client = getSupabaseClient();
@@ -598,6 +896,38 @@ export class SupabaseService {
         console.error('Falha ao salvar veículo no Supabase:', error.message, row);
         return false;
       }
+
+      // Sincronizar também nas tabelas filhas dedicadas
+      try {
+        // Documentos
+        if (v.documents) {
+          const docRows: any[] = [];
+          Object.entries(v.documents).forEach(([docType, doc]) => {
+            if (doc && (doc as any).expiryDate) {
+              const dRow = toDatabaseVehicleDocument(v.id, docType, doc);
+              if (dRow) docRows.push(dRow);
+            }
+          });
+          if (docRows.length > 0) {
+            await client.from('vehicle_documents').upsert(docRows, { onConflict: 'id' });
+          }
+        }
+
+        // Anexos
+        if (Array.isArray(v.attachments) && v.attachments.length > 0) {
+          const attRows = v.attachments.map(att => toDatabaseVehicleAttachment(v.id, att));
+          await client.from('vehicle_attachments').upsert(attRows, { onConflict: 'id' });
+        }
+
+        // Equipamentos
+        if (Array.isArray(v.equipments) && v.equipments.length > 0) {
+          const eqRows = v.equipments.map(eq => toDatabaseVehicleEquipment(v.id, eq));
+          await client.from('vehicle_equipments').upsert(eqRows, { onConflict: 'id' });
+        }
+      } catch (subErr) {
+        console.debug('Aviso subtabelas ao sincronizar veículo:', subErr);
+      }
+
       return true;
     } catch (err: any) {
       console.error('Erro ao salvar veículo no Supabase:', err.message);
@@ -613,6 +943,13 @@ export class SupabaseService {
     if (!client) return false;
 
     try {
+      // Limpar subtabelas caso ON DELETE CASCADE não esteja ativo
+      await Promise.allSettled([
+        client.from('vehicle_documents').delete().eq('vehicle_id', id),
+        client.from('vehicle_attachments').delete().eq('vehicle_id', id),
+        client.from('vehicle_equipments').delete().eq('vehicle_id', id)
+      ]);
+
       const { error } = await client.from('vehicles').delete().eq('id', id);
       if (error) console.error('Erro ao deletar veículo no Supabase:', error.message);
       return !error;
@@ -641,6 +978,17 @@ export class SupabaseService {
         console.error('Falha ao salvar OS no Supabase:', error.message, row);
         return false;
       }
+
+      // Sincronizar anexos da OS se existirem
+      if (Array.isArray(so.attachments) && so.attachments.length > 0) {
+        try {
+          const attRows = so.attachments.map(att => toDatabaseServiceOrderAttachment(so.id, att));
+          await client.from('service_order_attachments').upsert(attRows, { onConflict: 'id' });
+        } catch (subErr) {
+          console.debug('Aviso anexos de OS ao salvar:', subErr);
+        }
+      }
+
       return true;
     } catch (err: any) {
       console.error('Erro ao salvar OS no Supabase:', err.message);
@@ -656,6 +1004,7 @@ export class SupabaseService {
     if (!client) return false;
 
     try {
+      await client.from('service_order_attachments').delete().eq('service_order_id', id);
       const { error } = await client.from('service_orders').delete().eq('id', id);
       if (error) console.error('Erro ao deletar OS no Supabase:', error.message);
       return !error;

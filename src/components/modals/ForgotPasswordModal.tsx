@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { 
   X, 
   Mail, 
-  Phone, 
   KeyRound, 
   ArrowLeft, 
   CheckCircle2, 
@@ -16,7 +15,10 @@ import {
 } from 'lucide-react';
 import { useFleet } from '../../context/FleetContext';
 import { User } from '../../types';
+import { INITIAL_USERS } from '../../data/initialData';
 import { emailService } from '../../services/emailService';
+import { getSupabaseClient } from '../../services/supabaseClient';
+import { toFrontendUser } from '../../services/supabaseService';
 
 interface ForgotPasswordModalProps {
   isOpen: boolean;
@@ -56,30 +58,58 @@ export const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({
   const [isSendingCode, setIsSendingCode] = useState(false);
   const [deliveryStatusInfo, setDeliveryStatusInfo] = useState<{ simulated: boolean; realSent: boolean }>({ simulated: true, realSent: false });
 
-  // Reset or match user on open / identifier change
+  // Helper function to find a user by email, phone digits, or name
+  const findUser = (input: string, userList: User[]): User | undefined => {
+    const clean = input.trim().toLowerCase();
+    if (!clean) return undefined;
+    const cleanDigits = input.replace(/\D/g, '');
+
+    return userList.find(u => {
+      // 1. Email exact match
+      if (u.email && u.email.trim().toLowerCase() === clean) return true;
+      // 2. Name exact match
+      if (u.name && u.name.trim().toLowerCase() === clean) return true;
+      // 3. Phone match
+      if (u.phone && cleanDigits.length >= 8) {
+        const uDigits = u.phone.replace(/\D/g, '');
+        if (uDigits.length >= 8) {
+          if (uDigits === cleanDigits) return true;
+          if (uDigits.includes(cleanDigits) || cleanDigits.includes(uDigits)) return true;
+          if (uDigits.slice(-8) === cleanDigits.slice(-8)) return true;
+        }
+      }
+      return false;
+    });
+  };
+
+  // Only reset state when modal actually opens (never when external state updates)
   useEffect(() => {
     if (isOpen) {
       setStep('identify');
-      setIdentifier(initialIdentifier);
+      setIdentifier(initialIdentifier || '');
       setError('');
       setInfoMessage('');
       setEnteredCode('');
       setNewPassword('');
       setConfirmPassword('');
-      
-      // Try to find user from initial identifier
+      setGeneratedCode('');
+      setCountdownCooldown(0);
+
+      // Check if initial identifier matches any user
       if (initialIdentifier) {
-        const found = users.find(
-          u => u.email.toLowerCase() === initialIdentifier.trim().toLowerCase() ||
-               (u.phone && u.phone.replace(/\D/g, '') === initialIdentifier.replace(/\D/g, ''))
-        );
-        if (found) {
-          setTargetUser(found);
-          setChannel(found.email ? 'email' : 'phone');
+        const allCandidates = [...users, ...INITIAL_USERS];
+        const match = findUser(initialIdentifier, allCandidates);
+        if (match) {
+          setTargetUser(match);
+          setChannel(initialIdentifier.includes('@') ? 'email' : (match.phone ? 'phone' : 'email'));
+        } else {
+          setTargetUser(null);
         }
+      } else {
+        setTargetUser(null);
       }
     }
-  }, [isOpen, initialIdentifier, users]);
+  }, [isOpen]);
 
   // Handle countdown timer
   useEffect(() => {
@@ -106,46 +136,91 @@ export const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({
   const maskPhone = (phoneStr: string) => {
     if (!phoneStr) return 'Celular não cadastrado';
     const clean = phoneStr.trim();
-    if (clean.length < 9) return clean;
-    return clean.replace(/(\d{2,3})\s*(\d{1})(\d{3,4})[-.\s]*(\d{4})/, '($1) $2****-$4');
+    if (clean.length < 8) return clean;
+    const digits = clean.replace(/\D/g, '');
+    if (digits.length >= 10) {
+      const ddd = digits.slice(0, 2);
+      const last4 = digits.slice(-4);
+      return `(${ddd}) 9****-${last4}`;
+    }
+    return clean;
   };
 
-  const handleSendCode = async () => {
+  // Handler when user types or changes identifier in input
+  const handleIdentifierChange = (value: string) => {
+    setIdentifier(value);
     setError('');
-    const cleanIdentifier = identifier.trim().toLowerCase();
+    const clean = value.trim();
+    if (!clean) {
+      setTargetUser(null);
+      return;
+    }
+
+    const allCandidates = [...users, ...INITIAL_USERS];
+    const match = findUser(clean, allCandidates);
+    if (match) {
+      setTargetUser(match);
+      if (clean.includes('@')) {
+        setChannel('email');
+      } else if (clean.replace(/\D/g, '').length >= 8 && match.phone) {
+        setChannel('phone');
+      }
+    } else {
+      setTargetUser(null);
+    }
+  };
+
+  const handleSendCode = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    setError('');
+    const cleanIdentifier = identifier.trim();
     if (!cleanIdentifier) {
       setError('Por favor, informe seu e-mail ou celular cadastrado.');
       return;
     }
 
-    // Lookup user by email or phone digits
-    const cleanDigits = identifier.replace(/\D/g, '');
-    const found = users.find(u => {
-      const matchEmail = u.email.toLowerCase() === cleanIdentifier;
-      const matchPhone = u.phone && cleanDigits.length >= 8 && u.phone.replace(/\D/g, '').includes(cleanDigits);
-      return matchEmail || matchPhone;
-    });
+    setIsSendingCode(true);
+
+    let found = targetUser || findUser(cleanIdentifier, [...users, ...INITIAL_USERS]);
+
+    // If still not found, check directly on Supabase database in real-time
+    if (!found) {
+      const client = getSupabaseClient();
+      if (client) {
+        try {
+          const { data: dbUsers } = await client.from('users').select('*');
+          if (Array.isArray(dbUsers) && dbUsers.length > 0) {
+            const mapped = dbUsers.map(toFrontendUser);
+            found = findUser(cleanIdentifier, mapped);
+          }
+        } catch (dbErr) {
+          console.debug('Aviso ao consultar Supabase para recuperação:', dbErr);
+        }
+      }
+    }
 
     if (!found) {
-      setError('Nenhum usuário cadastrado foi encontrado com esse e-mail ou celular.');
+      setIsSendingCode(false);
+      setError('Nenhum usuário cadastrado foi encontrado com esse e-mail ou celular. Verifique os dados digitados.');
       return;
     }
 
     setTargetUser(found);
 
+    // If phone chosen but user has no phone, switch to email
+    let effectiveChannel = channel;
     if (channel === 'phone' && !found.phone) {
-      setError('Este usuário não possui número de celular cadastrado. Por favor, selecione envio por E-mail.');
-      return;
+      effectiveChannel = 'email';
+      setChannel('email');
     }
 
-    // Generate 6 digit code
+    // Generate random 6-digit code
     const code = Math.floor(100000 + Math.random() * 900000).toString();
     setGeneratedCode(code);
     setCountdownCooldown(30);
     setEnteredCode('');
-    setIsSendingCode(true);
 
-    if (channel === 'email') {
+    if (effectiveChannel === 'email') {
       try {
         const sendResult = await emailService.sendRecoveryCode(found.email, code, found.name);
         if (sendResult.success && !sendResult.simulated) {
@@ -163,7 +238,7 @@ export const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({
     } else {
       setIsSendingCode(false);
       setDeliveryStatusInfo({ simulated: true, realSent: false });
-      setInfoMessage(`Código de verificação enviado para ${found.phone || 'celular cadastrado'}!`);
+      setInfoMessage(`Código de verificação enviado para o celular ${found.phone}!`);
     }
 
     setStep('verify');
@@ -191,7 +266,7 @@ export const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({
         setIsSendingCode(false);
       }
     } else {
-      setInfoMessage(`Novo código enviado para ${channel === 'email' ? targetUser?.email : targetUser?.phone}!`);
+      setInfoMessage(`Novo código gerado para ${channel === 'email' ? targetUser?.email : targetUser?.phone}!`);
     }
   };
 
@@ -199,12 +274,12 @@ export const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({
     e.preventDefault();
     setError('');
     if (!enteredCode.trim()) {
-      setError('Por favor, digite o código de 6 dígitos recebido.');
+      setError('Por favor, digite o código de 6 dígitos.');
       return;
     }
 
     if (enteredCode.trim() !== generatedCode.trim()) {
-      setError('Código inválido ou expirado. Verifique os dígitos e tente novamente.');
+      setError('Código incorreto. Verifique os dígitos informados e tente novamente.');
       return;
     }
 
@@ -238,7 +313,7 @@ export const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({
 
   const handleFinishAndLogin = () => {
     if (targetUser) {
-      login(targetUser.email);
+      login(targetUser.email, newPassword || targetUser.password, true);
     }
     onClose();
   };
@@ -274,7 +349,7 @@ export const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({
         {/* Content Body */}
         <div className="p-6">
           {error && (
-            <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-700 text-xs rounded-xl flex items-start gap-2">
+            <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-700 text-xs rounded-xl flex items-start gap-2 animate-in fade-in duration-150">
               <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-red-600" />
               <span>{error}</span>
             </div>
@@ -282,7 +357,7 @@ export const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({
 
           {/* STEP 1: IDENTIFY & CHOOSE CHANNEL */}
           {step === 'identify' && (
-            <div className="space-y-4">
+            <form onSubmit={handleSendCode} className="space-y-4">
               <p className="text-xs text-slate-600 leading-relaxed">
                 Informe o seu <strong>e-mail corporativo</strong> ou o <strong>celular cadastrado</strong> para receber o código de segurança.
               </p>
@@ -295,22 +370,11 @@ export const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({
                   <input
                     type="text"
                     value={identifier}
-                    onChange={(e) => {
-                      setIdentifier(e.target.value);
-                      setError('');
-                      const val = e.target.value.trim().toLowerCase();
-                      const digits = val.replace(/\D/g, '');
-                      const match = users.find(u => 
-                        u.email.toLowerCase() === val || 
-                        (u.phone && digits.length >= 8 && u.phone.replace(/\D/g, '').includes(digits))
-                      );
-                      if (match) {
-                        setTargetUser(match);
-                      }
-                    }}
-                    placeholder="Ex: daniel.jesus@linde.com ou (11) 98765-4321"
+                    onChange={(e) => handleIdentifierChange(e.target.value)}
+                    placeholder="Ex: danjs23@gmail.com ou (11) 98765-4321"
                     className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#ff5500] focus:bg-white transition"
                     autoFocus
+                    required
                   />
                 </div>
               </div>
@@ -339,7 +403,7 @@ export const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({
                       <span className="text-xs font-bold text-slate-900">Por E-mail</span>
                     </div>
                     <span className="text-[10px] text-slate-500 truncate">
-                      {targetUser ? maskEmail(targetUser.email) : 'E-mail cadastrado'}
+                      {targetUser?.email ? maskEmail(targetUser.email) : 'E-mail cadastrado'}
                     </span>
                   </button>
 
@@ -367,24 +431,30 @@ export const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({
               </div>
 
               {targetUser && (
-                <div className="p-3 bg-emerald-50 border border-emerald-200/90 rounded-xl flex items-center gap-2.5 text-xs text-emerald-900">
+                <div className="p-3 bg-emerald-50 border border-emerald-200/90 rounded-xl flex items-center gap-2.5 text-xs text-emerald-900 animate-in fade-in duration-150">
                   <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
                   <div className="truncate">
                     <span className="font-bold">{targetUser.name}</span>
-                    <span className="text-emerald-700 block text-[11px]">{targetUser.role} · Usuário Verificado</span>
+                    <span className="text-emerald-700 block text-[11px]">{targetUser.role} · Usuário Localizado</span>
                   </div>
                 </div>
               )}
 
               <button
-                type="button"
-                onClick={handleSendCode}
-                className="w-full mt-2 bg-[#ff5500] hover:bg-[#e64d00] text-white font-bold py-3 px-4 rounded-xl text-xs sm:text-sm shadow-md shadow-orange-500/20 transition active:scale-[0.98] flex items-center justify-center gap-2 cursor-pointer"
+                type="submit"
+                disabled={isSendingCode}
+                className="w-full mt-2 bg-[#ff5500] hover:bg-[#e64d00] disabled:bg-slate-300 text-white font-bold py-3 px-4 rounded-xl text-xs sm:text-sm shadow-md shadow-orange-500/20 transition active:scale-[0.98] flex items-center justify-center gap-2 cursor-pointer"
               >
-                <Send className="w-4 h-4" />
-                <span>Enviar Código de Recuperação</span>
+                {isSendingCode ? (
+                  <span>Enviando código...</span>
+                ) : (
+                  <>
+                    <Send className="w-4 h-4" />
+                    <span>Enviar Código de Recuperação</span>
+                  </>
+                )}
               </button>
-            </div>
+            </form>
           )}
 
           {/* STEP 2: ENTER CODE */}
@@ -407,7 +477,7 @@ export const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({
                     <span>Código gerado para envio!</span>
                   </div>
                   <p className="text-[11px] text-blue-800 leading-relaxed">
-                    Destino: <strong>{channel === 'email' ? targetUser?.email : targetUser?.phone}</strong>.
+                    Destino: <strong>{channel === 'email' ? targetUser?.email : (targetUser?.phone || identifier)}</strong>.
                   </p>
                 </div>
               )}
@@ -416,8 +486,8 @@ export const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({
               {generatedCode && (
                 <div className="p-3 bg-amber-50 border border-amber-200/90 rounded-xl flex items-center justify-between gap-2">
                   <div className="text-[11px] text-amber-900">
-                    <span className="block font-bold">Simulação de recebimento no {channel === 'email' ? 'e-mail' : 'celular'}:</span>
-                    <span className="font-mono text-xs font-black text-amber-800 tracking-wider">Código: {generatedCode}</span>
+                    <span className="block font-bold">Código de verificação ({channel === 'email' ? 'E-mail' : 'SMS'}):</span>
+                    <span className="font-mono text-sm font-black text-amber-800 tracking-wider">Código: {generatedCode}</span>
                   </div>
                   <button
                     type="button"
@@ -425,7 +495,7 @@ export const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({
                       setEnteredCode(generatedCode);
                       setError('');
                     }}
-                    className="px-2.5 py-1 text-[11px] font-bold bg-amber-600 hover:bg-amber-700 text-white rounded-lg transition shrink-0 cursor-pointer shadow-2xs"
+                    className="px-3 py-1.5 text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white rounded-lg transition shrink-0 cursor-pointer shadow-xs active:scale-95"
                   >
                     Preencher código
                   </button>
@@ -447,6 +517,7 @@ export const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({
                   placeholder="000000"
                   className="w-full text-center tracking-[0.5em] font-mono font-black text-2xl py-3 bg-slate-50 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#ff5500] focus:bg-white transition"
                   autoFocus
+                  required
                 />
               </div>
 
@@ -457,7 +528,7 @@ export const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({
                   className="text-slate-500 hover:text-slate-800 flex items-center gap-1 font-semibold cursor-pointer"
                 >
                   <ArrowLeft className="w-3.5 h-3.5" />
-                  <span>Trocar canal / e-mail</span>
+                  <span>Trocar e-mail ou celular</span>
                 </button>
 
                 <button
@@ -534,38 +605,37 @@ export const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({
                 className="w-full mt-2 bg-[#ff5500] hover:bg-[#e64d00] text-white font-bold py-3 px-4 rounded-xl text-xs sm:text-sm shadow-md shadow-orange-500/20 transition active:scale-[0.98] flex items-center justify-center gap-2 cursor-pointer"
               >
                 <KeyRound className="w-4 h-4" />
-                <span>Salvar Nova Senha e Conectar</span>
+                <span>Salvar Nova Senha</span>
               </button>
             </form>
           )}
 
           {/* STEP 4: SUCCESS */}
           {step === 'success' && (
-            <div className="text-center py-4 space-y-4">
-              <div className="w-14 h-14 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto shadow-md">
-                <CheckCircle2 className="w-8 h-8" />
+            <div className="space-y-5 text-center py-2">
+              <div className="w-14 h-14 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto shadow-inner">
+                <CheckCircle2 className="w-8 h-8 stroke-[2.5]" />
               </div>
-              <div>
+
+              <div className="space-y-1">
                 <h4 className="text-base font-black text-slate-900 tracking-tight">
                   Senha Redefinida com Sucesso!
                 </h4>
-                <p className="text-xs text-slate-500 mt-1 max-w-xs mx-auto">
-                  Sua nova senha foi salva. Você já pode continuar navegando no sistema.
+                <p className="text-xs text-slate-500 max-w-xs mx-auto leading-relaxed">
+                  Sua nova senha de acesso foi registrada e sincronizada. Você já pode se autenticar na plataforma.
                 </p>
               </div>
 
               <button
                 type="button"
                 onClick={handleFinishAndLogin}
-                className="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold py-3 px-4 rounded-xl text-xs sm:text-sm shadow-md transition active:scale-[0.98] cursor-pointer"
+                className="w-full bg-[#ff5500] hover:bg-[#e64d00] text-white font-bold py-3 px-4 rounded-xl text-xs sm:text-sm shadow-md shadow-orange-500/20 transition active:scale-[0.98] flex items-center justify-center gap-2 cursor-pointer"
               >
-                Acessar o Sistema Agora
+                <span>Entrar no Sistema Agora</span>
               </button>
             </div>
           )}
-
         </div>
-
       </div>
     </div>
   );

@@ -50,9 +50,10 @@ interface ActiveAlertBanner {
 interface FleetContextType {
   currentUser: User | null;
   isAuthenticated: boolean;
-  login: (email: string, role?: string) => boolean;
+  login: (email: string, password?: string, skipPasswordCheck?: boolean) => { success: boolean; error?: string };
   logout: () => void;
   switchUser: (userId: string) => void;
+  syncSupabaseNow: () => Promise<{ success: boolean; message: string }>;
   
   users: User[];
   setUsers: React.Dispatch<React.SetStateAction<User[]>>;
@@ -277,13 +278,18 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   });
 
   const [currentUser, setCurrentUser] = useState<User | null>(() => {
-    const savedId = localStorage.getItem('gestao_frotas_current_user_id');
-    const found = INITIAL_USERS.find(u => u.id === savedId) || INITIAL_USERS[0];
+    // Ao acessar o Link, exigir autenticação. Só restaura se houver sessão ativa na aba atual.
+    const isSessionAuth = sessionStorage.getItem('gestao_frotas_session_auth') === 'true';
+    if (!isSessionAuth) return null;
+    const savedId = sessionStorage.getItem('gestao_frotas_current_user_id') || localStorage.getItem('gestao_frotas_current_user_id');
+    if (!savedId) return null;
+    const found = INITIAL_USERS.find(u => u.id === savedId);
     return found ? sanitizeUserAtribuicoes(found) : null;
   });
 
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
-    return localStorage.getItem('gestao_frotas_auth') !== 'false';
+    // Ao acessar o Link, solicitar login e senha de usuários, não acessar direto.
+    return sessionStorage.getItem('gestao_frotas_session_auth') === 'true';
   });
 
   const [vehicles, setVehicles] = useState<Vehicle[]>(() => {
@@ -575,7 +581,8 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
         // Se o Supabase já tem veículos, sincroniza o estado da aplicação
         if (remote.vehicles.length > 0) {
-          setVehicles(remote.vehicles);
+          const enriched = remote.vehicles.map(enrichVehicleCargoProducts);
+          setVehicles(enriched);
         } else if (isInitial && vehicles.length > 0) {
           // Se o banco estiver vazio na primeira execução, popula com os dados atuais
           SupabaseService.pushAll(vehicles, serviceOrders, users, notifications).catch(err => {
@@ -587,7 +594,8 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           setServiceOrders(remote.serviceOrders);
         }
         if (remote.users.length > 0) {
-          setUsers(remote.users);
+          const sanitizedUsers = remote.users.map(sanitizeUserAtribuicoes);
+          setUsers(sanitizedUsers);
         }
       } catch (err: any) {
         console.debug('Supabase sync notice:', err?.message);
@@ -602,7 +610,7 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       onVehicleChange: (event, payload) => {
         if (!isMounted) return;
         if ((event === 'INSERT' || event === 'UPDATE') && payload.new) {
-          const veh = toFrontendVehicle(payload.new);
+          const veh = enrichVehicleCargoProducts(toFrontendVehicle(payload.new));
           setVehicles(prev => {
             const exists = prev.some(v => v.id === veh.id);
             if (exists) {
@@ -632,7 +640,7 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       onUserChange: (event, payload) => {
         if (!isMounted) return;
         if ((event === 'INSERT' || event === 'UPDATE') && payload.new) {
-          const u = toFrontendUser(payload.new);
+          const u = sanitizeUserAtribuicoes(toFrontendUser(payload.new));
           setUsers(prev => {
             const exists = prev.some(user => user.id === u.id);
             if (exists) {
@@ -646,8 +654,8 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       }
     });
 
-    // 3. Heartbeat periódico a cada 25 segundos e ao focar a aba
-    const interval = setInterval(() => syncFromRemote(false), 25000);
+    // 3. Heartbeat periódico a cada 20 segundos e ao focar a aba
+    const interval = setInterval(() => syncFromRemote(false), 20000);
     const handleFocus = () => syncFromRemote(false);
     window.addEventListener('focus', handleFocus);
 
@@ -659,24 +667,84 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     };
   }, []);
 
-  const login = (email: string): boolean => {
-    const user = users.find(u => u.email.toLowerCase().trim() === email.toLowerCase().trim());
-    if (user) {
-      setCurrentUser(user);
-      setIsAuthenticated(true);
-      localStorage.setItem('gestao_frotas_auth', 'true');
-      return true;
+  const syncSupabaseNow = async (): Promise<{ success: boolean; message: string }> => {
+    try {
+      const remote = await SupabaseService.fetchAll();
+      if (remote.vehicles.length > 0) {
+        setVehicles(remote.vehicles.map(enrichVehicleCargoProducts));
+      }
+      if (remote.serviceOrders.length > 0) {
+        setServiceOrders(remote.serviceOrders);
+      }
+      if (remote.users.length > 0) {
+        setUsers(remote.users.map(sanitizeUserAtribuicoes));
+      }
+      return {
+        success: true,
+        message: `Sincronizado com sucesso! (${remote.vehicles.length} veículos, ${remote.serviceOrders.length} OSs, ${remote.users.length} usuários)`
+      };
+    } catch (err: any) {
+      return {
+        success: false,
+        message: err?.message || 'Erro ao sincronizar com o Supabase'
+      };
     }
-    // Fallback: log in as admin
-    setCurrentUser(users[0]);
+  };
+
+  const login = (identifier: string, password?: string, skipPasswordCheck = false): { success: boolean; error?: string } => {
+    const cleanId = (identifier || '').trim().toLowerCase();
+    if (!cleanId) {
+      return { success: false, error: 'Por favor, informe seu e-mail ou nome de usuário.' };
+    }
+
+    const cleanPass = (password || '').trim();
+    if (!skipPasswordCheck && !cleanPass) {
+      return { success: false, error: 'Por favor, digite sua senha de acesso.' };
+    }
+
+    const user = users.find(u => 
+      u.email.toLowerCase().trim() === cleanId || 
+      u.name.toLowerCase().trim() === cleanId
+    );
+
+    if (!user) {
+      return { success: false, error: 'Usuário não encontrado. Verifique o e-mail ou nome digitado.' };
+    }
+
+    if (!skipPasswordCheck) {
+      // Se o usuário possui senha gravada
+      if (user.password && user.password.trim() !== '') {
+        if (user.password.trim() !== cleanPass) {
+          return { success: false, error: 'Senha incorreta. Tente novamente ou use "Esqueceu a senha?".' };
+        }
+      } else {
+        // Se ainda não tiver senha cadastrada no banco, aceita a senha digitada (mínimo 4 caracteres)
+        if (cleanPass.length < 4) {
+          return { success: false, error: 'A senha de acesso deve ter pelo menos 4 caracteres.' };
+        }
+        const updatedUser = { ...user, password: cleanPass };
+        updateUser(user.id, { password: cleanPass });
+        SupabaseService.upsertUser(updatedUser).catch(err => {
+          console.debug('Aviso ao registrar senha inicial no Supabase:', err);
+        });
+      }
+    }
+
+    setCurrentUser(user);
     setIsAuthenticated(true);
-    localStorage.setItem('gestao_frotas_auth', 'true');
-    return true;
+    sessionStorage.setItem('gestao_frotas_session_auth', 'true');
+    sessionStorage.setItem('gestao_frotas_current_user_id', user.id);
+    localStorage.setItem('gestao_frotas_current_user_id', user.id);
+    return { success: true };
   };
 
   const logout = () => {
     setIsAuthenticated(false);
-    localStorage.setItem('gestao_frotas_auth', 'false');
+    setCurrentUser(null);
+    sessionStorage.removeItem('gestao_frotas_session_auth');
+    sessionStorage.removeItem('gestao_frotas_current_user_id');
+    localStorage.removeItem('gestao_frotas_auth');
+    localStorage.removeItem('gestao_frotas_current_user_id');
     hasTriggeredAlertForSessionRef.current = null;
     setIsCriticalPopupOpen(false);
   };
@@ -993,14 +1061,6 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       return updated;
     });
   };
-    setVehicles(prev => prev.map(v => {
-      if (v.id !== vehicleId) return v;
-      return {
-        ...v,
-        equipments: (v.equipments || []).filter(eq => eq.id !== equipmentId),
-      };
-    }));
-  };
 
   const CAN_CLOSE_OS_ROLES: UserRole[] = [
     'Motorista',
@@ -1063,7 +1123,14 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const vehicle = vehicles.find(v => v.id === data.vehicleId);
     if (!vehicle) throw new Error('Veículo não encontrado');
 
-    const nextNumber = serviceOrders.length + 10;
+    const existingNumbers = serviceOrders
+      .map(os => {
+        const match = os.code.match(/\d+/);
+        return match ? parseInt(match[0], 10) : 0;
+      })
+      .filter(n => !isNaN(n));
+    const maxNum = existingNumbers.length > 0 ? Math.max(...existingNumbers) : 0;
+    const nextNumber = Math.max(maxNum + 1, 1);
     const formattedCode = `OS-${String(nextNumber).padStart(5, '0')}`;
 
     // Compute automatic routing based on category
@@ -1145,8 +1212,8 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       category: newOS.category,
     });
 
-    SupabaseService.upsertServiceOrder(newOS).catch(err => {
-      console.debug('Supabase open OS background notice:', err?.message);
+    SupabaseService.upsertServiceOrder(newOS, vehicle).catch(err => {
+      console.debug('Supabase open OS notice:', err?.message);
     });
 
     return newOS;
@@ -1175,72 +1242,75 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       throw new Error('Apenas motorista, administrador, gerente, encarregado e monitor podem encerrar ordens de serviço. Técnicos só podem colocar Em andamento ou marcar como Resolvida.');
     }
 
-    setServiceOrders(prev => prev.map(os => {
-      if (os.id !== id) return os;
+    setServiceOrders(prev => {
       const todayStr = new Date().toLocaleDateString('pt-BR');
       const isResolved = status === 'Resolvida' || status === 'Encerrada';
 
-      // Executor de fato: preenchido quando status vai para Resolvida (ou quando diretamente Encerrada)
-      let executedByUserId = os.executedByUserId;
-      let executedByName = audit?.executedByName || os.executedByName;
-      let executedByRole = audit?.executedByRole || os.executedByRole;
-      let executedAt = os.executedAt;
+      const updatedList = prev.map(os => {
+        if (os.id !== id) return os;
 
-      if (status === 'Resolvida') {
-        executedByUserId = currentUser?.id || os.assignedToUserId;
-        executedByName = audit?.executedByName || currentUser?.name || os.assignedToName;
-        executedByRole = audit?.executedByRole || currentUser?.role || os.assignedRole;
-        executedAt = todayStr;
-      } else if (status === 'Encerrada' && !executedByName) {
-        executedByUserId = os.assignedToUserId || currentUser?.id;
-        executedByName = audit?.executedByName || os.assignedToName || currentUser?.name;
-        executedByRole = audit?.executedByRole || os.assignedRole || currentUser?.role;
-        executedAt = os.executedAt || todayStr;
-      }
+        // Executor de fato: preenchido quando status vai para Resolvida (ou quando diretamente Encerrada)
+        let executedByUserId = os.executedByUserId;
+        let executedByName = audit?.executedByName || os.executedByName;
+        let executedByRole = audit?.executedByRole || os.executedByRole;
+        let executedAt = os.executedAt;
 
-      // Encerrou a ordem após constatar: preenchido quando status vai para Encerrada
-      let closedByUserId = os.closedByUserId;
-      let closedByName = audit?.closedByName || os.closedByName;
-      let closedByRole = audit?.closedByRole || os.closedByRole;
-      let closedAt = os.closedAt;
+        if (status === 'Resolvida') {
+          executedByUserId = currentUser?.id || os.assignedToUserId;
+          executedByName = audit?.executedByName || currentUser?.name || os.assignedToName;
+          executedByRole = audit?.executedByRole || currentUser?.role || os.assignedRole;
+          executedAt = todayStr;
+        } else if (status === 'Encerrada' && !executedByName) {
+          executedByUserId = os.assignedToUserId || currentUser?.id;
+          executedByName = audit?.executedByName || os.assignedToName || currentUser?.name;
+          executedByRole = audit?.executedByRole || os.assignedRole || currentUser?.role;
+          executedAt = os.executedAt || todayStr;
+        }
 
-      if (status === 'Encerrada') {
-        closedByUserId = currentUser?.id;
-        closedByName = audit?.closedByName || currentUser?.name;
-        closedByRole = audit?.closedByRole || currentUser?.role;
-        closedAt = todayStr;
-      }
+        // Encerrou a ordem após constatar: preenchido quando status vai para Encerrada
+        let closedByUserId = os.closedByUserId;
+        let closedByName = audit?.closedByName || os.closedByName;
+        let closedByRole = audit?.closedByRole || os.closedByRole;
+        let closedAt = os.closedAt;
 
-      const mergedImages = additionalImages && additionalImages.length > 0
-        ? [...(os.images || []), ...additionalImages]
-        : os.images;
+        if (status === 'Encerrada') {
+          closedByUserId = currentUser?.id;
+          closedByName = audit?.closedByName || currentUser?.name;
+          closedByRole = audit?.closedByRole || currentUser?.role;
+          closedAt = todayStr;
+        }
 
-      return {
-        ...os,
-        status,
-        resolutionNotes: notes !== undefined ? notes : os.resolutionNotes,
-        resolvedAt: isResolved ? (os.resolvedAt || todayStr) : undefined,
-        executedByUserId,
-        executedByName,
-        executedByRole,
-        executedAt,
-        closedByUserId,
-        closedByName,
-        closedByRole,
-        closedAt,
-        images: mergedImages,
-      };
-    }));
+        const mergedImages = additionalImages && additionalImages.length > 0
+          ? [...(os.images || []), ...additionalImages]
+          : os.images;
 
-    // Sincronizar atualização de status no Supabase em segundo plano
-    setTimeout(() => {
-      const target = serviceOrders.find(o => o.id === id);
+        return {
+          ...os,
+          status,
+          resolutionNotes: notes !== undefined ? notes : os.resolutionNotes,
+          resolvedAt: isResolved ? (os.resolvedAt || todayStr) : undefined,
+          executedByUserId,
+          executedByName,
+          executedByRole,
+          executedAt,
+          closedByUserId,
+          closedByName,
+          closedByRole,
+          closedAt,
+          images: mergedImages,
+        };
+      });
+
+      // Sincronizar imediatamente com o Supabase sem closure desatualizada
+      const target = updatedList.find(o => o.id === id);
       if (target) {
-        SupabaseService.upsertServiceOrder({ ...target, status, resolutionNotes: notes || target.resolutionNotes }).catch(err => {
-          console.debug('Supabase update status background notice:', err?.message);
+        SupabaseService.upsertServiceOrder(target).catch(err => {
+          console.debug('Supabase update status notice:', err?.message);
         });
       }
-    }, 50);
+
+      return updatedList;
+    });
   };
 
   const deleteServiceOrder = (id: string) => {
@@ -1645,6 +1715,7 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       getAutoDirectedUsersForCategory,
       canCloseOS,
       canUserCloseOS,
+      syncSupabaseNow,
     }}>
       {children}
     </FleetContext.Provider>
