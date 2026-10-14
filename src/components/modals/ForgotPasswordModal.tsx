@@ -372,7 +372,7 @@ export const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({
                     value={identifier}
                     onChange={(e) => handleIdentifierChange(e.target.value)}
                     placeholder="Ex: danjs23@gmail.com ou (11) 98765-4321"
-                    className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#ff5500] focus:bg-white transition"
+                    className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm text-black placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-[#ff5500] focus:bg-white transition"
                     autoFocus
                     required
                   />
@@ -515,7 +515,7 @@ export const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({
                     setError('');
                   }}
                   placeholder="000000"
-                  className="w-full text-center tracking-[0.5em] font-mono font-black text-2xl py-3 bg-slate-50 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#ff5500] focus:bg-white transition"
+                  className="w-full text-center tracking-[0.5em] font-mono font-black text-2xl py-3 bg-slate-50 border border-slate-300 rounded-xl text-black placeholder:text-slate-300 focus:outline-none focus:ring-2 focus:ring-[#ff5500] focus:bg-white transition"
                   autoFocus
                   required
                 />
@@ -572,7 +572,7 @@ export const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({
                     value={newPassword}
                     onChange={(e) => setNewPassword(e.target.value)}
                     placeholder="Mínimo 6 caracteres"
-                    className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#ff5500] focus:bg-white transition pr-10"
+                    className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm text-black placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-[#ff5500] focus:bg-white transition pr-10"
                     autoFocus
                     required
                   />
@@ -595,7 +595,7 @@ export const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
                   placeholder="Repita a nova senha"
-                  className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#ff5500] focus:bg-white transition"
+                  className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm text-black placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-[#ff5500] focus:bg-white transition"
                   required
                 />
               </div>
