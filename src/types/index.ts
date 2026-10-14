@@ -247,7 +247,6 @@ export interface SystemNotification {
 }
 
 export interface NotificationSettings {
-  resendApiKey: string;
   senderEmail: string;
   daysThreshold: number; // e.g. 10 or 30
   autoEmailOnNewOS: boolean;

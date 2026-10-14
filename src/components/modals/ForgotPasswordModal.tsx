@@ -44,7 +44,7 @@ export const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({
   // Verification code state
   const [generatedCode, setGeneratedCode] = useState('');
   const [enteredCode, setEnteredCode] = useState('');
-  const [resendCountdown, setResendCountdown] = useState(0);
+  const [countdownCooldown, setCountdownCooldown] = useState(0);
 
   // New password state
   const [newPassword, setNewPassword] = useState('');
@@ -54,7 +54,7 @@ export const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({
   const [error, setError] = useState('');
   const [infoMessage, setInfoMessage] = useState('');
   const [isSendingCode, setIsSendingCode] = useState(false);
-  const [resendStatusInfo, setResendStatusInfo] = useState<{ simulated: boolean; realSent: boolean }>({ simulated: true, realSent: false });
+  const [deliveryStatusInfo, setDeliveryStatusInfo] = useState<{ simulated: boolean; realSent: boolean }>({ simulated: true, realSent: false });
 
   // Reset or match user on open / identifier change
   useEffect(() => {
@@ -84,11 +84,11 @@ export const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({
   // Handle countdown timer
   useEffect(() => {
     let timer: NodeJS.Timeout;
-    if (resendCountdown > 0) {
-      timer = setTimeout(() => setResendCountdown(prev => prev - 1), 1000);
+    if (countdownCooldown > 0) {
+      timer = setTimeout(() => setCountdownCooldown(prev => prev - 1), 1000);
     }
     return () => clearTimeout(timer);
-  }, [resendCountdown]);
+  }, [countdownCooldown]);
 
   if (!isOpen) return null;
 
@@ -141,7 +141,7 @@ export const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({
     // Generate 6 digit code
     const code = Math.floor(100000 + Math.random() * 900000).toString();
     setGeneratedCode(code);
-    setResendCountdown(30);
+    setCountdownCooldown(30);
     setEnteredCode('');
     setIsSendingCode(true);
 
@@ -149,31 +149,31 @@ export const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({
       try {
         const sendResult = await emailService.sendRecoveryCode(found.email, code, found.name);
         if (sendResult.success && !sendResult.simulated) {
-          setResendStatusInfo({ simulated: false, realSent: true });
-          setInfoMessage(`E-mail com código enviado com sucesso via Resend para ${found.email}!`);
+          setDeliveryStatusInfo({ simulated: false, realSent: true });
+          setInfoMessage(`E-mail com código enviado com sucesso para ${found.email}!`);
         } else {
-          setResendStatusInfo({ simulated: true, realSent: false });
+          setDeliveryStatusInfo({ simulated: true, realSent: false });
           setInfoMessage(`Código gerado com sucesso para ${found.email}.`);
         }
       } catch {
-        setResendStatusInfo({ simulated: true, realSent: false });
+        setDeliveryStatusInfo({ simulated: true, realSent: false });
       } finally {
         setIsSendingCode(false);
       }
     } else {
       setIsSendingCode(false);
-      setResendStatusInfo({ simulated: true, realSent: false });
+      setDeliveryStatusInfo({ simulated: true, realSent: false });
       setInfoMessage(`Código de verificação enviado para ${found.phone || 'celular cadastrado'}!`);
     }
 
     setStep('verify');
   };
 
-  const handleResendCode = async () => {
-    if (resendCountdown > 0) return;
+  const handleReenviarCodigo = async () => {
+    if (countdownCooldown > 0) return;
     const code = Math.floor(100000 + Math.random() * 900000).toString();
     setGeneratedCode(code);
-    setResendCountdown(30);
+    setCountdownCooldown(30);
     setError('');
 
     if (channel === 'email' && targetUser) {
@@ -181,10 +181,10 @@ export const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({
       try {
         const result = await emailService.sendRecoveryCode(targetUser.email, code, targetUser.name);
         if (result.success && !result.simulated) {
-          setResendStatusInfo({ simulated: false, realSent: true });
-          setInfoMessage(`Novo código enviado via Resend para ${targetUser.email}!`);
+          setDeliveryStatusInfo({ simulated: false, realSent: true });
+          setInfoMessage(`Novo código enviado para ${targetUser.email}!`);
         } else {
-          setResendStatusInfo({ simulated: true, realSent: false });
+          setDeliveryStatusInfo({ simulated: true, realSent: false });
           setInfoMessage(`Novo código gerado para ${targetUser.email}!`);
         }
       } finally {
@@ -390,11 +390,11 @@ export const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({
           {/* STEP 2: ENTER CODE */}
           {step === 'verify' && (
             <form onSubmit={handleValidateCode} className="space-y-4">
-              {channel === 'email' && resendStatusInfo.realSent ? (
+              {channel === 'email' && deliveryStatusInfo.realSent ? (
                 <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-900 space-y-1">
                   <div className="flex items-center gap-1.5 font-bold">
                     <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                    <span>E-mail real enviado via Resend!</span>
+                    <span>E-mail com código enviado!</span>
                   </div>
                   <p className="text-[11px] text-emerald-800 leading-relaxed">
                     O código foi despachado para: <strong>{targetUser?.email}</strong>. Verifique sua caixa de entrada ou spam.
@@ -462,14 +462,14 @@ export const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({
 
                 <button
                   type="button"
-                  disabled={resendCountdown > 0}
-                  onClick={handleResendCode}
+                  disabled={countdownCooldown > 0}
+                  onClick={handleReenviarCodigo}
                   className={`flex items-center gap-1 font-bold ${
-                    resendCountdown > 0 ? 'text-slate-400 cursor-not-allowed' : 'text-[#ff5500] hover:underline cursor-pointer'
+                    countdownCooldown > 0 ? 'text-slate-400 cursor-not-allowed' : 'text-[#ff5500] hover:underline cursor-pointer'
                   }`}
                 >
-                  <RefreshCw className={`w-3.5 h-3.5 ${resendCountdown > 0 ? 'animate-spin' : ''}`} />
-                  <span>{resendCountdown > 0 ? `Reenviar em ${resendCountdown}s` : 'Reenviar código'}</span>
+                  <RefreshCw className={`w-3.5 h-3.5 ${countdownCooldown > 0 ? 'animate-spin' : ''}`} />
+                  <span>{countdownCooldown > 0 ? `Reenviar em ${countdownCooldown}s` : 'Reenviar código'}</span>
                 </button>
               </div>
 

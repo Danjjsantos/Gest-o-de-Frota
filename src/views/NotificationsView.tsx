@@ -33,7 +33,6 @@ import {
   Share2
 } from 'lucide-react';
 import { useFleet, formatDisplayDate } from '../context/FleetContext';
-import { ResendIntegrationModal } from '../components/modals/ResendIntegrationModal';
 import { sendEmail } from '../utils/email';
 import { 
   playCriticalAlertSound, 
@@ -67,11 +66,9 @@ export const NotificationsView: React.FC<NotificationsViewProps> = ({ onNavigate
 
   const isAdmin = currentUser?.role === 'Administrador' || currentUser?.role === 'Gerente';
 
-  const [resendApiKey, setResendApiKey] = useState(settings.resendApiKey);
   const [senderEmail, setSenderEmail] = useState(settings.senderEmail);
   const [daysThreshold, setDaysThreshold] = useState(settings.daysThreshold);
   const [criticalDaysThreshold, setCriticalDaysThreshold] = useState(settings.criticalDaysThreshold || 7);
-  const [showResendModal, setShowResendModal] = useState(false);
   const [soundAlertEnabled, setSoundAlertEnabled] = useState(settings.soundAlertEnabled ?? true);
   const [popupAlertEnabled, setPopupAlertEnabled] = useState(settings.popupAlertEnabled ?? true);
   const [browserPushEnabled, setBrowserPushEnabled] = useState(settings.browserPushEnabled ?? true);
@@ -165,7 +162,6 @@ export const NotificationsView: React.FC<NotificationsViewProps> = ({ onNavigate
     const parsed = Number(daysThreshold) || 30;
     const parsedCritical = Number(criticalDaysThreshold) || 7;
     updateSettings({
-      resendApiKey,
       senderEmail,
       daysThreshold: parsed,
       criticalDaysThreshold: parsedCritical,
@@ -251,17 +247,17 @@ export const NotificationsView: React.FC<NotificationsViewProps> = ({ onNavigate
             <p style="color: #64748b; font-size: 13px; line-height: 1.5;">${summaryText}</p>
             <div style="margin-top: 24px; padding-top: 16px; border-top: 1px solid #f1f5f9; font-size: 11px; color: #94a3b8; text-align: center;">
               Enviado para os e-mails cadastrados: ${targetRecipients.join(', ')}<br>
-              &copy; ${new Date().getFullYear()} Gestão Frotas via Resend API.
+              &copy; ${new Date().getFullYear()} Gestão Frotas.
             </div>
           </div>
         `,
         text: summaryText,
       });
 
-      if (emailResult.success && !emailResult.simulated) {
-        setSendSuccessMessage(`Disparado e-mail real via Resend para ${targetRecipients.join(', ')}! (ID: ${emailResult.id})`);
-      } else {
+      if (emailResult.success) {
         setSendSuccessMessage(`Alerta enviado com sucesso para ${targetRecipients.join(', ')}.`);
+      } else {
+        setSendSuccessMessage(`Alerta processado para ${targetRecipients.join(', ')}.`);
       }
     } catch (err: any) {
       setSendSuccessMessage(`Falha no envio de e-mails: ${err.message || 'Erro desconhecido'}`);
@@ -1143,31 +1139,6 @@ export const NotificationsView: React.FC<NotificationsViewProps> = ({ onNavigate
               </ul>
             </div>
 
-            {/* Resend Integration Card */}
-            <div className="pt-2 border-t border-slate-100 space-y-2">
-              <div className="flex items-center justify-between">
-                <label className="block text-xs font-bold text-slate-700">
-                  Integração Resend (Email API)
-                </label>
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
-                  Backend Ativo
-                </span>
-              </div>
-              <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
-                <p className="text-xs text-slate-600">
-                  O envio de e-mails para recuperação de senha e alertas opera via servidor seguro Express com Resend API.
-                </p>
-                <button
-                  type="button"
-                  onClick={() => setShowResendModal(true)}
-                  className="w-full flex items-center justify-center gap-2 py-2 px-3 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-bold transition shadow-xs cursor-pointer"
-                >
-                  <Zap className="w-3.5 h-3.5 text-[#ff5500]" />
-                  <span>Abrir Central de Teste e Configuração Resend</span>
-                </button>
-              </div>
-            </div>
-
             {/* Email Remetente */}
             <div>
               <label className="block text-xs font-bold text-slate-700 mb-1">
@@ -1177,7 +1148,7 @@ export const NotificationsView: React.FC<NotificationsViewProps> = ({ onNavigate
                 type="email"
                 value={senderEmail}
                 onChange={e => setSenderEmail(e.target.value)}
-                placeholder="delivered@resend.dev"
+                placeholder="notificacoes@gestaofrotas.com.br"
                 className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono focus:outline-none focus:ring-2 focus:ring-[#ff5500]"
               />
             </div>
@@ -1353,12 +1324,6 @@ export const NotificationsView: React.FC<NotificationsViewProps> = ({ onNavigate
           </form>
         </div>
       </div>
-
-      {/* Modal de Integração Resend */}
-      <ResendIntegrationModal
-        isOpen={showResendModal}
-        onClose={() => setShowResendModal(false)}
-      />
     </div>
   );
 };

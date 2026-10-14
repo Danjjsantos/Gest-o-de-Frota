@@ -10,11 +10,11 @@ import {
   ChevronRight,
   Plus,
   X,
-  KeyRound
+  KeyRound,
+  Database
 } from 'lucide-react';
 import { useFleet } from '../context/FleetContext';
 import { MyProfileModal } from './modals/MyProfileModal';
-import { ResendIntegrationModal } from './modals/ResendIntegrationModal';
 
 export type ActiveTab = 'dashboard' | 'frotas' | 'os' | 'usuarios' | 'notificacoes' | 'relatorio';
 
@@ -22,6 +22,7 @@ interface SidebarProps {
   activeTab: ActiveTab;
   setActiveTab: (tab: ActiveTab) => void;
   onOpenNewOS?: () => void;
+  onOpenSupabase?: () => void;
   isOpen: boolean;
   onClose: () => void;
 }
@@ -30,12 +31,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
   activeTab, 
   setActiveTab, 
   onOpenNewOS,
+  onOpenSupabase,
   isOpen,
   onClose
 }) => {
   const { currentUser, logout, notifications } = useFleet();
   const [showProfileModal, setShowProfileModal] = React.useState(false);
-  const [showResendModal, setShowResendModal] = React.useState(false);
 
   // Close on Escape key press
   useEffect(() => {
@@ -191,24 +192,27 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </div>
           )}
 
-          {/* Resend Integration Access Button */}
-          <div className="pt-2">
-            <button
-              type="button"
-              onClick={() => setShowResendModal(true)}
-              className="w-full flex items-center justify-between px-3.5 py-2 rounded-xl text-xs font-semibold text-slate-400 hover:text-white hover:bg-slate-800/60 border border-slate-800/80 transition group cursor-pointer"
-            >
-              <div className="flex items-center gap-2.5">
-                <div className="w-5 h-5 rounded-md bg-black text-white flex items-center justify-center font-black text-[10px] shadow-xs">
-                  R
+          {/* Supabase Database Hub Button */}
+          {onOpenSupabase && (
+            <div className="pt-2">
+              <button
+                onClick={() => {
+                  onOpenSupabase();
+                  onClose();
+                }}
+                className="w-full flex items-center justify-between gap-2 bg-emerald-950/40 hover:bg-emerald-900/50 text-emerald-300 border border-emerald-500/30 hover:border-emerald-500/60 py-2 px-3 rounded-xl text-xs font-semibold shadow-sm transition active:scale-95"
+                title="Gerenciar tabelas e sincronização com Supabase"
+              >
+                <div className="flex items-center gap-2">
+                  <Database className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Banco Supabase</span>
                 </div>
-                <span>Integração Resend</span>
-              </div>
-              <span className="text-[10px] text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20 font-mono font-bold">
-                Email API
-              </span>
-            </button>
-          </div>
+                <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-200 border border-emerald-500/30">
+                  SQL
+                </span>
+              </button>
+            </div>
+          )}
         </div>
 
         {/* User Card & Role Switcher */}
@@ -259,12 +263,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
         <MyProfileModal
           isOpen={showProfileModal}
           onClose={() => setShowProfileModal(false)}
-        />
-
-        {/* Modal de Integração e Testes do Resend */}
-        <ResendIntegrationModal
-          isOpen={showResendModal}
-          onClose={() => setShowResendModal(false)}
         />
       </aside>
     </>

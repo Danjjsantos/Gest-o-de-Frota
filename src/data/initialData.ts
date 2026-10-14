@@ -768,6 +768,26 @@ export const INITIAL_VEHICLES: Vehicle[] = [
       CIV: { type: 'CIV', expiryDate: '2026-09-25', status: 'expiring' },
       Tacógrafo: null,
     }
+  },
+  {
+    id: 'veh-1210',
+    fleetNumber: '1210',
+    type: 'Cavalo Mecânico',
+    plate: 'PQX-9C21',
+    uf: 'GO',
+    brand: 'Scania',
+    model: 'R 450',
+    year: 2021,
+    renavam: '01684756215',
+    color: 'Branco',
+    status: 'Ativo',
+    createdAt: '2026-03-25',
+    documents: {
+      CRLV: { type: 'CRLV', expiryDate: '2026-11-20', status: 'valid' },
+      CIV: { type: 'CIV', expiryDate: '2026-10-30', status: 'expiring' },
+      CIPP: null,
+      Tacógrafo: { type: 'Tacógrafo', expiryDate: '2027-02-15', status: 'valid' },
+    }
   }
 ];
 
@@ -1018,8 +1038,7 @@ export const INITIAL_NOTIFICATIONS: SystemNotification[] = [
 ];
 
 export const INITIAL_SETTINGS: NotificationSettings = {
-  resendApiKey: '',
-  senderEmail: 'Gestão Frotas <onboarding@resend.dev>',
+  senderEmail: 'Gestão Frotas <notificacoes@gestaofrotas.com.br>',
   daysThreshold: 30,
   autoEmailOnNewOS: true,
   autoEmailOnExpiringDoc: true,

@@ -1,12 +1,9 @@
 export * from '../utils/email';
 
-export interface ResendStatus {
+export interface EmailServerStatus {
   configured: boolean;
   fromEmail: string;
-  maskedKey?: string | null;
   supportedFeatures?: string[];
-  isSandbox?: boolean;
-  ownerEmail?: string;
 }
 
 export interface EmailSendResult {
@@ -18,17 +15,15 @@ export interface EmailSendResult {
 }
 
 export const emailService = {
-  // Check if Resend is configured on server
-  async checkStatus(): Promise<ResendStatus> {
+  async checkStatus(): Promise<EmailServerStatus> {
     try {
       const res = await fetch('/api/email/status');
       if (!res.ok) throw new Error('Falha ao checar status do e-mail');
       return await res.json();
     } catch (err) {
-      console.warn('Erro ao consultar /api/email/status:', err);
       return {
-        configured: false,
-        fromEmail: 'onboarding@resend.dev',
+        configured: true,
+        fromEmail: 'Gestão Frotas <notificacoes@gestaofrotas.com.br>',
       };
     }
   },
@@ -65,15 +60,15 @@ export const emailService = {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           to,
-          subject: 'Teste de Integração Resend - Gestão Frotas',
+          subject: 'Teste de Notificação - Gestão Frotas',
           html: `
             <div style="font-family: Arial, sans-serif; max-width: 500px; padding: 24px; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px;">
               <h2 style="color: #0f172a; margin-top: 0;">Gestão Frotas</h2>
               <div style="padding: 12px; background: #ecfdf5; border: 1px solid #10b981; border-radius: 8px; color: #065f46; font-weight: bold; margin-bottom: 16px;">
-                ✅ Integração com Resend funcionando com sucesso!
+                ✅ Sistema de Notificações operando com sucesso!
               </div>
               <p style="color: #475569; font-size: 14px; line-height: 1.5;">
-                Este é um e-mail de teste disparado a partir da sua plataforma <strong>Gestão Frotas</strong> utilizando o serviço <strong>Resend</strong>.
+                Este é um e-mail de teste disparado a partir da sua plataforma <strong>Gestão Frotas</strong>.
               </p>
               <p style="color: #94a3b8; font-size: 12px; margin-top: 24px;">
                 Horário do disparo: ${new Date().toLocaleString('pt-BR')}

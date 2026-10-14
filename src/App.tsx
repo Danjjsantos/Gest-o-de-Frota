@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useMemo } from 'react';
-import { Menu, Truck } from 'lucide-react';
+import { Menu, Truck, Database } from 'lucide-react';
 import { FleetProvider, useFleet } from './context/FleetContext';
 import { Sidebar, ActiveTab } from './components/Sidebar';
 import { AlertBanner } from './components/AlertBanner';
@@ -23,6 +23,7 @@ import { NewUserModal } from './components/modals/NewUserModal';
 import { VehicleDetailModal } from './components/modals/VehicleDetailModal';
 import { ServiceOrderDetailModal } from './components/modals/ServiceOrderDetailModal';
 import { CriticalExpirationsPopup } from './components/CriticalExpirationsPopup';
+import { SupabaseSyncModal } from './components/modals/SupabaseSyncModal';
 
 import { Vehicle, ServiceOrder, OSCategory } from './types';
 
@@ -46,6 +47,7 @@ function MainApp() {
   const [isNewVehicleModalOpen, setIsNewVehicleModalOpen] = useState(false);
   const [isNewOSModalOpen, setIsNewOSModalOpen] = useState(false);
   const [isNewUserModalOpen, setIsNewUserModalOpen] = useState(false);
+  const [isSupabaseModalOpen, setIsSupabaseModalOpen] = useState(false);
   const [selectedVehicle, setSelectedVehicle] = useState<Vehicle | null>(null);
   const [selectedOS, setSelectedOS] = useState<ServiceOrder | null>(null);
   const [preselectedVehicleId, setPreselectedVehicleId] = useState<string | undefined>(undefined);
@@ -74,7 +76,7 @@ function MainApp() {
 
   return (
     <div className="flex flex-col h-screen bg-[#f8fafc] text-slate-800 antialiased overflow-hidden font-sans">
-      {/* Cabeçalho Superior idêntico à imagem de referência */}
+      {/* Cabeçalho Superior */}
       <header className="h-16 bg-[#0f172a] border-b border-slate-800/90 px-4 sm:px-6 flex items-center justify-between z-30 shrink-0 select-none shadow-md">
         {/* Esquerda: Ícone Laranja com Caminhão + GESTÃO FROTAS */}
         <div className="flex items-center gap-3">
@@ -86,9 +88,17 @@ function MainApp() {
           </h1>
         </div>
 
-        {/* Direita: Três Traços (Menu Hamburger) */}
+        {/* Direita: Acesso Supabase + Menu Hamburger */}
         <div className="flex items-center gap-2 sm:gap-3">
-          {/* Três Traços (Menu Hamburger) */}
+          <button
+            onClick={() => setIsSupabaseModalOpen(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-emerald-950/60 hover:bg-emerald-900/80 text-emerald-300 border border-emerald-500/30 transition shadow-sm cursor-pointer active:scale-95"
+            title="Banco de Dados Supabase (Tabelas e Sincronização)"
+          >
+            <Database className="w-4 h-4 text-emerald-400" />
+            <span className="hidden sm:inline">Supabase</span>
+          </button>
+
           <button
             onClick={() => setIsMenuOpen(true)}
             className="p-2 rounded-xl text-slate-200 hover:text-white hover:bg-slate-800 transition active:scale-95 flex items-center justify-center cursor-pointer"
@@ -119,6 +129,7 @@ function MainApp() {
         activeTab={activeTab} 
         setActiveTab={setActiveTab} 
         onOpenNewOS={() => setIsNewOSModalOpen(true)}
+        onOpenSupabase={() => setIsSupabaseModalOpen(true)}
       />
 
       {/* Content Area */}
@@ -206,6 +217,11 @@ function MainApp() {
         os={currentSelectedOS}
         isOpen={!!selectedOS}
         onClose={() => setSelectedOS(null)}
+      />
+
+      <SupabaseSyncModal
+        isOpen={isSupabaseModalOpen}
+        onClose={() => setIsSupabaseModalOpen(false)}
       />
     </div>
   );

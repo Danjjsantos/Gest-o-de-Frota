@@ -1,0 +1,752 @@
+import { getSupabaseClient, getSupabaseConfig } from './supabaseClient';
+import { Vehicle, ServiceOrder, User, SystemNotification } from '../types';
+
+export interface TableStatusInfo {
+  name: string;
+  label: string;
+  description: string;
+  exists: boolean;
+  count: number;
+  error?: string;
+}
+
+export interface SupabaseHealthResult {
+  connected: boolean;
+  url: string;
+  message: string;
+  pingMs?: number;
+  tables: TableStatusInfo[];
+}
+
+export const REQUIRED_TABLES: Array<{ name: string; label: string; description: string }> = [
+  { name: 'vehicles', label: 'Veículos da Frota', description: 'Armazena caminhões, carretas, vácuo e dados principais' },
+  { name: 'service_orders', label: 'Ordens de Serviço (OS)', description: 'Ordens abertas, em andamento, atribuídas e finalizadas' },
+  { name: 'users', label: 'Usuários & Colaboradores', description: 'Gestores, encarregados, mecânicos, motoristas e técnicos' },
+  { name: 'notifications', label: 'Notificações & Alertas', description: 'Alertas de vencimento de documentos e ordens de serviço' },
+  { name: 'vehicle_documents', label: 'Documentos da Frota', description: 'CRLV, CIV, CIPP e Tacógrafo com datas de vencimento' },
+  { name: 'vehicle_attachments', label: 'Anexos de Veículos', description: 'Laudos, fotos, manuais e notas fiscais de cada veículo' },
+  { name: 'vehicle_equipments', label: 'Equipamentos Calibráveis', description: 'Manômetros, válvulas e certificados de calibração' },
+  { name: 'service_order_attachments', label: 'Anexos de OS', description: 'Fotos e comprovantes de execução das ordens de serviço' },
+  { name: 'notification_settings', label: 'Configurações de Alertas', description: 'Parâmetros de envio de e-mail e antecedência de alertas' },
+  { name: 'audit_logs', label: 'Logs de Auditoria', description: 'Rastreabilidade de alterações e ações dos operadores' },
+];
+
+// =========================================================================
+// HELPER CONVERTERS & SANITIZERS (Crucial for PostgreSQL type safety)
+// =========================================================================
+
+export function parseDateToIso(val: any): string | null {
+  if (!val) return null;
+  const str = String(val).trim();
+  if (!str) return null;
+
+  // DD/MM/YYYY
+  if (/^\d{2}\/\d{2}\/\d{4}$/.test(str)) {
+    const [d, m, y] = str.split('/');
+    return `${y}-${m}-${d}`;
+  }
+
+  // YYYY-MM-DD
+  if (/^\d{4}-\d{2}-\d{2}/.test(str)) {
+    return str.split('T')[0];
+  }
+
+  const d = new Date(str);
+  return isNaN(d.getTime()) ? null : d.toISOString().split('T')[0];
+}
+
+export function parseTimestampToIso(val: any): string | null {
+  if (!val) return null;
+  const str = String(val).trim();
+  if (!str || str.includes('Hoje') || str.includes('Agora')) return null;
+
+  // DD/MM/YYYY
+  if (/^\d{2}\/\d{2}\/\d{4}$/.test(str)) {
+    const [d, m, y] = str.split('/');
+    return new Date(Date.UTC(Number(y), Number(m) - 1, Number(d), 12, 0, 0)).toISOString();
+  }
+
+  const d = new Date(str);
+  return isNaN(d.getTime()) ? null : d.toISOString();
+}
+
+export function formatIsoToBrDate(val: any, fallback = '14/07/2026'): string {
+  if (!val) return fallback;
+  const str = String(val).trim();
+  if (/^\d{2}\/\d{2}\/\d{4}$/.test(str)) return str;
+
+  try {
+    const d = new Date(str);
+    if (isNaN(d.getTime())) return fallback;
+    return d.toLocaleDateString('pt-BR');
+  } catch {
+    return fallback;
+  }
+}
+
+export function parseNumber(val: any, defaultVal: number | null = null): number | null {
+  if (val === undefined || val === null || val === '') return defaultVal;
+  if (typeof val === 'number') return isNaN(val) ? defaultVal : val;
+  const num = parseFloat(String(val).replace(',', '.'));
+  return isNaN(num) ? defaultVal : num;
+}
+
+// Convert Frontend Vehicle to Database Row
+export function toDatabaseVehicle(v: Vehicle): Record<string, any> {
+  const vacNum = parseNumber(v.vacuumValue);
+  const vacDate = parseDateToIso(v.vacuumDate);
+
+  // Preserve vacuumReadings inside documents JSON if available
+  const docs = { ...(v.documents || {}) };
+  if (v.vacuumReadings && v.vacuumReadings.length > 0) {
+    (docs as any)._vacuumReadings = v.vacuumReadings;
+  }
+
+  return {
+    id: v.id,
+    fleet_number: v.fleetNumber || '0000',
+    type: v.type || 'Carreta',
+    plate: v.plate || 'SEM-PLACA',
+    uf: v.uf || 'SP',
+    brand: v.brand || 'SR/RANDON',
+    model: v.model || 'Padrão',
+    year: Number(v.year) || new Date().getFullYear(),
+    renavam: v.renavam || null,
+    chassis: v.chassis || null,
+    color: v.color || 'Branco',
+    image_url: v.imageUrl || null,
+    status: v.status || 'Ativo',
+    cargo_products: Array.isArray(v.cargoProducts) ? v.cargoProducts : [],
+    cargo_product: v.cargoProduct || (v.cargoProducts?.[0] ?? null),
+    vacuum_value: vacNum,
+    vacuum_date: vacDate,
+    vacuum_unit: v.vacuumUnit || 'mtorr',
+    characteristics: v.characteristics || null,
+    additional_info: v.additionalInfo || null,
+    notes: v.notes || null,
+    documents: docs,
+    attachments: Array.isArray(v.attachments) ? v.attachments : [],
+    equipments: Array.isArray(v.equipments) ? v.equipments : [],
+    updated_at: new Date().toISOString()
+  };
+}
+
+// Convert Database Row to Frontend Vehicle
+export function toFrontendVehicle(row: any): Vehicle {
+  const docs = row.documents || {};
+  const readings = Array.isArray(docs._vacuumReadings) ? docs._vacuumReadings : (Array.isArray(row.vacuum_readings) ? row.vacuum_readings : []);
+
+  return {
+    id: row.id,
+    fleetNumber: row.fleet_number,
+    type: row.type,
+    plate: row.plate,
+    uf: row.uf,
+    brand: row.brand,
+    model: row.model,
+    year: Number(row.year) || 2024,
+    renavam: row.renavam || undefined,
+    chassis: row.chassis || undefined,
+    color: row.color || 'Branco',
+    imageUrl: row.image_url || undefined,
+    status: row.status || 'Ativo',
+    cargoProducts: Array.isArray(row.cargo_products) ? row.cargo_products : undefined,
+    cargoProduct: row.cargo_product || undefined,
+    vacuumValue: row.vacuum_value !== null && row.vacuum_value !== undefined ? Number(row.vacuum_value) : undefined,
+    vacuumDate: row.vacuum_date || undefined,
+    vacuumUnit: row.vacuum_unit || 'mtorr',
+    vacuumReadings: readings,
+    characteristics: row.characteristics || undefined,
+    additionalInfo: row.additional_info || undefined,
+    notes: row.notes || undefined,
+    documents: docs,
+    attachments: Array.isArray(row.attachments) ? row.attachments : [],
+    equipments: Array.isArray(row.equipments) ? row.equipments : [],
+    createdAt: row.created_at || new Date().toISOString()
+  };
+}
+
+// Convert Frontend Service Order to Database Row
+export function toDatabaseServiceOrder(so: ServiceOrder): Record<string, any> {
+  return {
+    id: so.id,
+    code: so.code,
+    vehicle_id: so.vehicleId,
+    fleet_number: so.fleetNumber || '',
+    plate: so.plate || '',
+    uf: so.uf || '',
+    category: so.category || 'Mecânica',
+    priority: so.priority || 'Média',
+    status: so.status || 'Aberta',
+    title: so.title || 'Manutenção',
+    description: so.description || '',
+    opened_by_user_id: so.openedByUserId || 'admin',
+    opened_by_name: so.openedByName || 'Administrador',
+    opened_by_role: so.openedByRole || 'Administrador',
+    assigned_to_user_id: so.assignedToUserId || null,
+    assigned_to_name: so.assignedToName || null,
+    assigned_role: so.assignedRole || null,
+    directed_users: Array.isArray(so.directedUsers) ? so.directedUsers : [],
+    directed_user_ids: Array.isArray(so.directedUserIds) ? so.directedUserIds : [],
+    directed_roles: Array.isArray(so.directedRoles) ? so.directedRoles : [],
+    resolution_notes: so.resolutionNotes || null,
+    executed_by_user_id: so.executedByUserId || null,
+    executed_by_name: so.executedByName || null,
+    executed_by_role: so.executedByRole || null,
+    executed_at: parseTimestampToIso(so.executedAt),
+    closed_by_user_id: so.closedByUserId || null,
+    closed_by_name: so.closedByName || null,
+    closed_by_role: so.closedByRole || null,
+    closed_at: parseTimestampToIso(so.closedAt),
+    cost: parseNumber(so.cost, 0),
+    images: Array.isArray(so.images) ? so.images : [],
+    attachments: Array.isArray(so.attachments) ? so.attachments : [],
+    updated_at: new Date().toISOString()
+  };
+}
+
+// Convert Database Row to Frontend Service Order
+export function toFrontendServiceOrder(row: any): ServiceOrder {
+  return {
+    id: row.id,
+    code: row.code,
+    title: row.title,
+    description: row.description,
+    vehicleId: row.vehicle_id,
+    fleetNumber: row.fleet_number,
+    plate: row.plate,
+    uf: row.uf,
+    category: row.category,
+    priority: row.priority,
+    status: row.status,
+    openedByUserId: row.opened_by_user_id,
+    openedByName: row.opened_by_name,
+    openedByRole: row.opened_by_role,
+    assignedToUserId: row.assigned_to_user_id || undefined,
+    assignedToName: row.assigned_to_name || undefined,
+    assignedRole: row.assigned_role || undefined,
+    directedUsers: Array.isArray(row.directed_users) ? row.directed_users : [],
+    directedUserIds: Array.isArray(row.directed_user_ids) ? row.directed_user_ids : [],
+    directedRoles: Array.isArray(row.directed_roles) ? row.directed_roles : [],
+    resolutionNotes: row.resolution_notes || undefined,
+    executedByUserId: row.executed_by_user_id || undefined,
+    executedByName: row.executed_by_name || undefined,
+    executedByRole: row.executed_by_role || undefined,
+    executedAt: row.executed_at ? formatIsoToBrDate(row.executed_at) : undefined,
+    closedByUserId: row.closed_by_user_id || undefined,
+    closedByName: row.closed_by_name || undefined,
+    closedByRole: row.closed_by_role || undefined,
+    closedAt: row.closed_at ? formatIsoToBrDate(row.closed_at) : undefined,
+    cost: parseNumber(row.cost, 0) || 0,
+    images: Array.isArray(row.images) ? row.images : [],
+    attachments: Array.isArray(row.attachments) ? row.attachments : [],
+    createdAt: row.created_at ? formatIsoToBrDate(row.created_at) : new Date().toLocaleDateString('pt-BR')
+  };
+}
+
+// Convert Frontend User to Database Row
+export function toDatabaseUser(u: User): Record<string, any> {
+  return {
+    id: u.id,
+    name: u.name,
+    email: u.email,
+    password: u.password || null,
+    role: u.role,
+    atribuicoes: Array.isArray(u.atribuicoes) ? u.atribuicoes : [],
+    phone: u.phone || null,
+    cnh_number: u.cnhNumber || null,
+    cnh_category: u.cnhCategory || null,
+    avatar_color: u.avatarColor || '#3b82f6',
+    active: true,
+    created_at: parseTimestampToIso(u.createdAt) || new Date().toISOString(),
+    updated_at: new Date().toISOString()
+  };
+}
+
+// Convert Database Row to Frontend User
+export function toFrontendUser(row: any): User {
+  return {
+    id: row.id,
+    name: row.name,
+    email: row.email,
+    role: row.role,
+    atribuicoes: Array.isArray(row.atribuicoes) ? row.atribuicoes : [],
+    phone: row.phone || undefined,
+    cnhNumber: row.cnh_number || undefined,
+    cnhCategory: row.cnh_category || undefined,
+    avatarColor: row.avatar_color || '#3b82f6',
+    createdAt: formatIsoToBrDate(row.created_at, '14/07/2026')
+  };
+}
+
+// =========================================================================
+// SUPABASE SERVICE CLASS
+// =========================================================================
+
+export class SupabaseService {
+  /**
+   * Testa a conexão com o Supabase e afere latência
+   */
+  static async testConnection(): Promise<{ success: boolean; message: string; pingMs?: number }> {
+    const client = getSupabaseClient();
+    const config = getSupabaseConfig();
+
+    if (!client || !config.isConfigured) {
+      return {
+        success: false,
+        message: 'Supabase não configurado. Verifique a URL e a Chave nas configurações.'
+      };
+    }
+
+    const start = performance.now();
+    try {
+      const { error } = await client.from('vehicles').select('id', { count: 'exact', head: true });
+      const pingMs = Math.round(performance.now() - start);
+
+      if (error && error.code !== 'PGRST116' && error.code !== 'PGRST205') {
+        if (error.message.includes('fetch failed') || error.message.includes('Failed to fetch')) {
+          return {
+            success: false,
+            message: `Falha de conexão com a URL: ${config.url}`,
+            pingMs
+          };
+        }
+      }
+
+      return {
+        success: true,
+        message: `Conectado com sucesso ao Supabase (${config.url})`,
+        pingMs
+      };
+    } catch (err: any) {
+      return {
+        success: false,
+        message: err.message || 'Erro inesperado ao conectar ao Supabase',
+        pingMs: Math.round(performance.now() - start)
+      };
+    }
+  }
+
+  /**
+   * Verifica a existência e quantidade de registros de cada tabela
+   */
+  static async checkTablesStatus(): Promise<SupabaseHealthResult> {
+    const config = getSupabaseConfig();
+    const client = getSupabaseClient();
+
+    if (!client || !config.isConfigured) {
+      return {
+        connected: false,
+        url: config.url || 'Não configurada',
+        message: 'Supabase não configurado',
+        tables: REQUIRED_TABLES.map(t => ({
+          ...t,
+          exists: false,
+          count: 0,
+          error: 'Credenciais ausentes'
+        }))
+      };
+    }
+
+    const start = performance.now();
+    let isConnected = true;
+    let message = 'Conexão ativa com Supabase';
+
+    const tablesInfo: TableStatusInfo[] = [];
+
+    for (const t of REQUIRED_TABLES) {
+      try {
+        const { count, error } = await client
+          .from(t.name)
+          .select('*', { count: 'exact', head: true });
+
+        if (error) {
+          if (error.code === 'PGRST205') {
+            tablesInfo.push({
+              ...t,
+              exists: false,
+              count: 0,
+              error: 'Tabela não criada no banco (execute o script SQL)'
+            });
+          } else {
+            tablesInfo.push({
+              ...t,
+              exists: false,
+              count: 0,
+              error: error.message
+            });
+          }
+        } else {
+          tablesInfo.push({
+            ...t,
+            exists: true,
+            count: count || 0
+          });
+        }
+      } catch (err: any) {
+        isConnected = false;
+        tablesInfo.push({
+          ...t,
+          exists: false,
+          count: 0,
+          error: err.message
+        });
+      }
+    }
+
+    const pingMs = Math.round(performance.now() - start);
+
+    return {
+      connected: isConnected,
+      url: config.url,
+      message,
+      pingMs,
+      tables: tablesInfo
+    };
+  }
+
+  /**
+   * Carrega todos os dados do Supabase (Vice-Versa: Banco -> Aplicação)
+   */
+  static async fetchAll(): Promise<{
+    vehicles: Vehicle[];
+    serviceOrders: ServiceOrder[];
+    users: User[];
+    notifications: SystemNotification[];
+  }> {
+    const client = getSupabaseClient();
+    if (!client) throw new Error('Cliente Supabase não configurado');
+
+    // 1. Fetch Users
+    const { data: usersData, error: usersErr } = await client.from('users').select('*');
+    if (usersErr && usersErr.code !== 'PGRST205') {
+      console.warn('Aviso ao buscar usuários do Supabase:', usersErr.message);
+    }
+
+    // 2. Fetch Vehicles
+    const { data: vehiclesData, error: vehErr } = await client.from('vehicles').select('*');
+    if (vehErr && vehErr.code !== 'PGRST205') {
+      console.warn('Aviso ao buscar veículos do Supabase:', vehErr.message);
+    }
+
+    // 3. Fetch Service Orders
+    const { data: soData, error: soErr } = await client.from('service_orders').select('*');
+    if (soErr && soErr.code !== 'PGRST205') {
+      console.warn('Aviso ao buscar ordens de serviço do Supabase:', soErr.message);
+    }
+
+    // 4. Fetch Notifications
+    const { data: notifData, error: notifErr } = await client.from('notifications').select('*');
+    if (notifErr && notifErr.code !== 'PGRST205') {
+      console.warn('Aviso ao buscar notificações do Supabase:', notifErr.message);
+    }
+
+    const mappedUsers: User[] = (usersData || []).map(toFrontendUser);
+    const mappedVehicles: Vehicle[] = (vehiclesData || []).map(toFrontendVehicle);
+    const mappedServiceOrders: ServiceOrder[] = (soData || []).map(toFrontendServiceOrder);
+
+    const mappedNotifications: SystemNotification[] = (notifData || []).map((row: any) => ({
+      id: row.id,
+      type: row.type,
+      title: row.title,
+      message: row.message,
+      vehicleId: row.vehicle_id || undefined,
+      fleetNumber: row.fleet_number || undefined,
+      plate: row.plate || undefined,
+      osCode: row.os_code || undefined,
+      docType: row.doc_type || undefined,
+      equipmentDescription: row.equipment_description || undefined,
+      equipmentTag: row.equipment_tag || undefined,
+      daysRemaining: row.days_remaining !== null ? row.days_remaining : undefined,
+      daysDiff: row.days_diff !== null ? row.days_diff : undefined,
+      read: Boolean(row.read),
+      timestamp: row.created_at ? formatIsoToBrDate(row.created_at) : 'Agora mesmo'
+    }));
+
+    return {
+      vehicles: mappedVehicles,
+      serviceOrders: mappedServiceOrders,
+      users: mappedUsers,
+      notifications: mappedNotifications
+    };
+  }
+
+  /**
+   * Envia todos os dados locais para o Supabase (Upsert em lote limpo e validado)
+   */
+  static async pushAll(
+    vehicles: Vehicle[],
+    serviceOrders: ServiceOrder[],
+    users: User[],
+    notifications: SystemNotification[]
+  ): Promise<{
+    usersCount: number;
+    vehiclesCount: number;
+    ordersCount: number;
+    notifsCount: number;
+    errors: string[];
+  }> {
+    const client = getSupabaseClient();
+    if (!client) throw new Error('Cliente Supabase não configurado');
+
+    const errors: string[] = [];
+    let usersCount = 0;
+    let vehiclesCount = 0;
+    let ordersCount = 0;
+    let notifsCount = 0;
+
+    // 1. Upsert Users (Garante que usuários responsáveis existam)
+    try {
+      const usersRows = users.map(toDatabaseUser);
+      if (usersRows.length > 0) {
+        const { error: userErr } = await client.from('users').upsert(usersRows, { onConflict: 'id' });
+        if (userErr) {
+          console.error('Erro ao salvar usuários no Supabase:', userErr);
+          errors.push(`Usuários: ${userErr.message}`);
+        } else {
+          usersCount = usersRows.length;
+        }
+      }
+    } catch (err: any) {
+      errors.push(`Usuários erro: ${err.message}`);
+    }
+
+    // 2. Upsert Vehicles (Garante que veículos existam para as foreign keys das OSs)
+    try {
+      const vehicleRows = vehicles.map(toDatabaseVehicle);
+      if (vehicleRows.length > 0) {
+        const { error: vehErr } = await client.from('vehicles').upsert(vehicleRows, { onConflict: 'id' });
+        if (vehErr) {
+          console.error('Erro ao salvar veículos no Supabase:', vehErr);
+          errors.push(`Veículos: ${vehErr.message}`);
+        } else {
+          vehiclesCount = vehicleRows.length;
+        }
+      }
+    } catch (err: any) {
+      errors.push(`Veículos erro: ${err.message}`);
+    }
+
+    // 3. Upsert Service Orders (Após veículos estarem salvos)
+    try {
+      const orderRows = serviceOrders.map(toDatabaseServiceOrder);
+      if (orderRows.length > 0) {
+        const { error: soErr } = await client.from('service_orders').upsert(orderRows, { onConflict: 'id' });
+        if (soErr) {
+          console.error('Erro ao salvar OSs no Supabase:', soErr);
+          errors.push(`Ordens de Serviço: ${soErr.message}`);
+        } else {
+          ordersCount = orderRows.length;
+        }
+      }
+    } catch (err: any) {
+      errors.push(`Ordens de Serviço erro: ${err.message}`);
+    }
+
+    // 4. Upsert Notifications
+    try {
+      const notifRows = notifications.map(n => ({
+        id: n.id,
+        type: n.type,
+        title: n.title,
+        message: n.message,
+        vehicle_id: n.vehicleId || null,
+        fleet_number: n.fleetNumber || null,
+        plate: n.plate || null,
+        os_code: n.osCode || null,
+        doc_type: n.docType || null,
+        equipment_description: n.equipmentDescription || null,
+        equipment_tag: n.equipmentTag || null,
+        days_remaining: parseNumber(n.daysRemaining),
+        days_diff: parseNumber(n.daysDiff),
+        read: Boolean(n.read),
+        created_at: new Date().toISOString()
+      }));
+
+      if (notifRows.length > 0) {
+        const { error: notifErr } = await client.from('notifications').upsert(notifRows, { onConflict: 'id' });
+        if (notifErr) {
+          errors.push(`Notificações: ${notifErr.message}`);
+        } else {
+          notifsCount = notifRows.length;
+        }
+      }
+    } catch (err: any) {
+      errors.push(`Notificações erro: ${err.message}`);
+    }
+
+    return {
+      usersCount,
+      vehiclesCount,
+      ordersCount,
+      notifsCount,
+      errors
+    };
+  }
+
+  /**
+   * Salvar ou atualizar veículo no Supabase (com todos os documentos e anexos)
+   */
+  static async upsertVehicle(v: Vehicle): Promise<boolean> {
+    const client = getSupabaseClient();
+    if (!client) return false;
+
+    try {
+      const row = toDatabaseVehicle(v);
+      const { error } = await client.from('vehicles').upsert(row, { onConflict: 'id' });
+      if (error) {
+        console.error('Falha ao salvar veículo no Supabase:', error.message, row);
+        return false;
+      }
+      return true;
+    } catch (err: any) {
+      console.error('Erro ao salvar veículo no Supabase:', err.message);
+      return false;
+    }
+  }
+
+  /**
+   * Deletar veículo no Supabase
+   */
+  static async deleteVehicle(id: string): Promise<boolean> {
+    const client = getSupabaseClient();
+    if (!client) return false;
+
+    try {
+      const { error } = await client.from('vehicles').delete().eq('id', id);
+      if (error) console.error('Erro ao deletar veículo no Supabase:', error.message);
+      return !error;
+    } catch (err: any) {
+      console.error('Erro ao deletar veículo:', err.message);
+      return false;
+    }
+  }
+
+  /**
+   * Salvar ou atualizar Ordem de Serviço (Garante que o veículo exista para evitar erro de FK)
+   */
+  static async upsertServiceOrder(so: ServiceOrder, vehicleFallback?: Vehicle): Promise<boolean> {
+    const client = getSupabaseClient();
+    if (!client) return false;
+
+    try {
+      // Se tiver dados do veículo, garante que o veículo está persistido antes de tentar salvar a OS
+      if (vehicleFallback) {
+        await SupabaseService.upsertVehicle(vehicleFallback);
+      }
+
+      const row = toDatabaseServiceOrder(so);
+      const { error } = await client.from('service_orders').upsert(row, { onConflict: 'id' });
+      if (error) {
+        console.error('Falha ao salvar OS no Supabase:', error.message, row);
+        return false;
+      }
+      return true;
+    } catch (err: any) {
+      console.error('Erro ao salvar OS no Supabase:', err.message);
+      return false;
+    }
+  }
+
+  /**
+   * Deletar Ordem de Serviço
+   */
+  static async deleteServiceOrder(id: string): Promise<boolean> {
+    const client = getSupabaseClient();
+    if (!client) return false;
+
+    try {
+      const { error } = await client.from('service_orders').delete().eq('id', id);
+      if (error) console.error('Erro ao deletar OS no Supabase:', error.message);
+      return !error;
+    } catch (err: any) {
+      console.error('Erro ao deletar OS:', err.message);
+      return false;
+    }
+  }
+
+  /**
+   * Salvar ou atualizar Usuário
+   */
+  static async upsertUser(u: User): Promise<boolean> {
+    const client = getSupabaseClient();
+    if (!client) return false;
+
+    try {
+      const row = toDatabaseUser(u);
+      const { error } = await client.from('users').upsert(row, { onConflict: 'id' });
+      if (error) {
+        console.error('Falha ao salvar usuário no Supabase:', error.message);
+        return false;
+      }
+      return true;
+    } catch (err: any) {
+      console.error('Erro ao salvar usuário no Supabase:', err.message);
+      return false;
+    }
+  }
+
+  /**
+   * Deletar Usuário
+   */
+  static async deleteUser(id: string): Promise<boolean> {
+    const client = getSupabaseClient();
+    if (!client) return false;
+
+    try {
+      const { error } = await client.from('users').delete().eq('id', id);
+      if (error) console.error('Erro ao deletar usuário no Supabase:', error.message);
+      return !error;
+    } catch (err: any) {
+      console.error('Erro ao deletar usuário:', err.message);
+      return false;
+    }
+  }
+
+  /**
+   * Assinar atualizações em tempo real (Supabase Realtime)
+   * Permite que alterações feitas no banco ou por outros usuários atualizem a interface instantaneamente!
+   */
+  static subscribeToChanges(callbacks: {
+    onVehicleChange?: (event: 'INSERT' | 'UPDATE' | 'DELETE', payload: any) => void;
+    onServiceOrderChange?: (event: 'INSERT' | 'UPDATE' | 'DELETE', payload: any) => void;
+    onUserChange?: (event: 'INSERT' | 'UPDATE' | 'DELETE', payload: any) => void;
+  }): () => void {
+    const client = getSupabaseClient();
+    if (!client) return () => {};
+
+    try {
+      const channel = client
+        .channel('public_fleet_realtime')
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'vehicles' },
+          payload => {
+            callbacks.onVehicleChange?.(payload.eventType as any, payload);
+          }
+        )
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'service_orders' },
+          payload => {
+            callbacks.onServiceOrderChange?.(payload.eventType as any, payload);
+          }
+        )
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'users' },
+          payload => {
+            callbacks.onUserChange?.(payload.eventType as any, payload);
+          }
+        )
+        .subscribe();
+
+      return () => {
+        client.removeChannel(channel);
+      };
+    } catch (err) {
+      console.warn('Realtime subscription not available:', err);
+      return () => {};
+    }
+  }
+}

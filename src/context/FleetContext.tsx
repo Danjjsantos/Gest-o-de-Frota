@@ -28,6 +28,14 @@ import {
   playTestChime, 
   sendBrowserPushNotification 
 } from '../utils/notificationAlerts';
+import { 
+  SupabaseService, 
+  toFrontendVehicle, 
+  toFrontendServiceOrder, 
+  toFrontendUser 
+} from '../services/supabaseService';
+import { getSupabaseConfig } from '../services/supabaseClient';
+
 
 interface ActiveAlertBanner {
   id: string;
@@ -47,11 +55,13 @@ interface FleetContextType {
   switchUser: (userId: string) => void;
   
   users: User[];
+  setUsers: React.Dispatch<React.SetStateAction<User[]>>;
   addUser: (userData: Omit<User, 'id' | 'createdAt'>) => User;
   updateUser: (id: string, updates: Partial<User>) => void;
   deleteUser: (id: string) => void;
 
   vehicles: Vehicle[];
+  setVehicles: React.Dispatch<React.SetStateAction<Vehicle[]>>;
   addVehicle: (vehicleData: Omit<Vehicle, 'id' | 'createdAt'>) => Vehicle;
   updateVehicle: (id: string, updates: Partial<Vehicle>) => void;
   deleteVehicle: (id: string) => void;
@@ -76,6 +86,7 @@ interface FleetContextType {
   deleteVehicleEquipment: (vehicleId: string, equipmentId: string) => void;
 
   serviceOrders: ServiceOrder[];
+  setServiceOrders: React.Dispatch<React.SetStateAction<ServiceOrder[]>>;
   openServiceOrder: (data: {
     vehicleId: string;
     title: string;
@@ -336,6 +347,8 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [isCriticalPopupOpen, setIsCriticalPopupOpen] = useState<boolean>(false);
   const hasTriggeredAlertForSessionRef = useRef<string | null>(null);
 
+
+
   // Sync to localStorage
   useEffect(() => {
     localStorage.setItem('gestao_frotas_users', JSON.stringify(users));
@@ -548,6 +561,104 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     });
   }, [vehicles, settings.daysThreshold]);
 
+  // Sincronização Bidirecional com o Supabase (Tempo Real via WebSockets + Heartbeat)
+  useEffect(() => {
+    const config = getSupabaseConfig();
+    if (!config.isConfigured) return;
+
+    let isMounted = true;
+
+    const syncFromRemote = async (isInitial = false) => {
+      try {
+        const remote = await SupabaseService.fetchAll();
+        if (!isMounted) return;
+
+        // Se o Supabase já tem veículos, sincroniza o estado da aplicação
+        if (remote.vehicles.length > 0) {
+          setVehicles(remote.vehicles);
+        } else if (isInitial && vehicles.length > 0) {
+          // Se o banco estiver vazio na primeira execução, popula com os dados atuais
+          SupabaseService.pushAll(vehicles, serviceOrders, users, notifications).catch(err => {
+            console.debug('Background Supabase seed notice:', err?.message);
+          });
+        }
+
+        if (remote.serviceOrders.length > 0) {
+          setServiceOrders(remote.serviceOrders);
+        }
+        if (remote.users.length > 0) {
+          setUsers(remote.users);
+        }
+      } catch (err: any) {
+        console.debug('Supabase sync notice:', err?.message);
+      }
+    };
+
+    // 1. Carga inicial
+    syncFromRemote(true);
+
+    // 2. Inscrição em Tempo Real (Supabase Realtime WebSockets)
+    const unsubscribe = SupabaseService.subscribeToChanges({
+      onVehicleChange: (event, payload) => {
+        if (!isMounted) return;
+        if ((event === 'INSERT' || event === 'UPDATE') && payload.new) {
+          const veh = toFrontendVehicle(payload.new);
+          setVehicles(prev => {
+            const exists = prev.some(v => v.id === veh.id);
+            if (exists) {
+              return prev.map(v => v.id === veh.id ? veh : v);
+            }
+            return [veh, ...prev];
+          });
+        } else if (event === 'DELETE' && payload.old) {
+          setVehicles(prev => prev.filter(v => v.id !== payload.old.id));
+        }
+      },
+      onServiceOrderChange: (event, payload) => {
+        if (!isMounted) return;
+        if ((event === 'INSERT' || event === 'UPDATE') && payload.new) {
+          const so = toFrontendServiceOrder(payload.new);
+          setServiceOrders(prev => {
+            const exists = prev.some(o => o.id === so.id);
+            if (exists) {
+              return prev.map(o => o.id === so.id ? so : o);
+            }
+            return [so, ...prev];
+          });
+        } else if (event === 'DELETE' && payload.old) {
+          setServiceOrders(prev => prev.filter(o => o.id !== payload.old.id));
+        }
+      },
+      onUserChange: (event, payload) => {
+        if (!isMounted) return;
+        if ((event === 'INSERT' || event === 'UPDATE') && payload.new) {
+          const u = toFrontendUser(payload.new);
+          setUsers(prev => {
+            const exists = prev.some(user => user.id === u.id);
+            if (exists) {
+              return prev.map(user => user.id === u.id ? u : user);
+            }
+            return [u, ...prev];
+          });
+        } else if (event === 'DELETE' && payload.old) {
+          setUsers(prev => prev.filter(user => user.id !== payload.old.id));
+        }
+      }
+    });
+
+    // 3. Heartbeat periódico a cada 25 segundos e ao focar a aba
+    const interval = setInterval(() => syncFromRemote(false), 25000);
+    const handleFocus = () => syncFromRemote(false);
+    window.addEventListener('focus', handleFocus);
+
+    return () => {
+      isMounted = false;
+      unsubscribe();
+      clearInterval(interval);
+      window.removeEventListener('focus', handleFocus);
+    };
+  }, []);
+
   const login = (email: string): boolean => {
     const user = users.find(u => u.email.toLowerCase().trim() === email.toLowerCase().trim());
     if (user) {
@@ -592,14 +703,26 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                    userData.role === 'Monitor' ? '#06b6d4' : '#64748b'
     });
     setUsers(prev => [sanitized, ...prev]);
+    SupabaseService.upsertUser(sanitized).catch(err => {
+      console.debug('Supabase add user notice:', err?.message);
+    });
     return sanitized;
   };
 
   const updateUser = (id: string, updates: Partial<User>) => {
-    setUsers(prev => prev.map(u => {
-      if (u.id !== id) return u;
-      return sanitizeUserAtribuicoes({ ...u, ...updates });
-    }));
+    setUsers(prev => {
+      const updated = prev.map(u => {
+        if (u.id !== id) return u;
+        return sanitizeUserAtribuicoes({ ...u, ...updates });
+      });
+      const target = updated.find(u => u.id === id);
+      if (target) {
+        SupabaseService.upsertUser(target).catch(err => {
+          console.debug('Supabase update user notice:', err?.message);
+        });
+      }
+      return updated;
+    });
     if (currentUser && currentUser.id === id) {
       setCurrentUser(prev => prev ? sanitizeUserAtribuicoes({ ...prev, ...updates }) : null);
     }
@@ -607,6 +730,9 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const deleteUser = (id: string) => {
     setUsers(prev => prev.filter(u => u.id !== id));
+    SupabaseService.deleteUser(id).catch(err => {
+      console.debug('Supabase delete user notice:', err?.message);
+    });
   };
 
   const addVehicle = (vehicleData: Omit<Vehicle, 'id' | 'createdAt'>): Vehicle => {
@@ -616,41 +742,69 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       createdAt: new Date().toISOString().split('T')[0],
     };
     setVehicles(prev => [newVehicle, ...prev]);
+    SupabaseService.upsertVehicle(newVehicle).catch(err => {
+      console.debug('Supabase add vehicle background notice:', err?.message);
+    });
     return newVehicle;
   };
 
   const updateVehicle = (id: string, updates: Partial<Vehicle>) => {
-    setVehicles(prev => prev.map(v => v.id === id ? { ...v, ...updates } : v));
+    setVehicles(prev => {
+      const updated = prev.map(v => v.id === id ? { ...v, ...updates } : v);
+      const target = updated.find(v => v.id === id);
+      if (target) {
+        SupabaseService.upsertVehicle(target).catch(err => {
+          console.debug('Supabase update vehicle background notice:', err?.message);
+        });
+      }
+      return updated;
+    });
   };
 
   const deleteVehicle = (id: string) => {
     setVehicles(prev => prev.filter(v => v.id !== id));
+    SupabaseService.deleteVehicle(id).catch(err => {
+      console.debug('Supabase delete vehicle background notice:', err?.message);
+    });
+  };
+
+  const syncVehicleToSupabase = (vehicleId: string, updatedVehiclesList: Vehicle[]) => {
+    const target = updatedVehiclesList.find(v => v.id === vehicleId);
+    if (target) {
+      SupabaseService.upsertVehicle(target).catch(err => {
+        console.debug('Supabase sync vehicle notice:', err?.message);
+      });
+    }
   };
 
   const updateVehicleDocument = (vehicleId: string, docType: DocumentType, expiryDate: string, number?: string) => {
-    setVehicles(prev => prev.map(v => {
-      if (v.id !== vehicleId) return v;
-      const targetDate = new Date(expiryDate);
-      const diffDays = Math.ceil((targetDate.getTime() - REFERENCE_DATE.getTime()) / (1000 * 60 * 60 * 24));
-      
-      let status: 'valid' | 'expiring' | 'expired' = 'valid';
-      if (diffDays < 0) {
-        status = 'expired';
-      } else if (diffDays <= settings.daysThreshold) {
-        status = 'expiring';
-      }
-
-      const updatedDocs = {
-        ...v.documents,
-        [docType]: {
-          type: docType,
-          expiryDate,
-          number: number || v.documents[docType]?.number,
-          status,
+    setVehicles(prev => {
+      const updated = prev.map(v => {
+        if (v.id !== vehicleId) return v;
+        const targetDate = new Date(expiryDate);
+        const diffDays = Math.ceil((targetDate.getTime() - REFERENCE_DATE.getTime()) / (1000 * 60 * 60 * 24));
+        
+        let status: 'valid' | 'expiring' | 'expired' = 'valid';
+        if (diffDays < 0) {
+          status = 'expired';
+        } else if (diffDays <= settings.daysThreshold) {
+          status = 'expiring';
         }
-      };
-      return { ...v, documents: updatedDocs };
-    }));
+
+        const updatedDocs = {
+          ...v.documents,
+          [docType]: {
+            type: docType,
+            expiryDate,
+            number: number || v.documents[docType]?.number,
+            status,
+          }
+        };
+        return { ...v, documents: updatedDocs };
+      });
+      syncVehicleToSupabase(vehicleId, updated);
+      return updated;
+    });
   };
 
   const updateVehicleDocumentWithFile = (
@@ -666,83 +820,95 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       notes?: string; 
     }
   ) => {
-    setVehicles(prev => prev.map(v => {
-      if (v.id !== vehicleId) return v;
-      const targetDate = new Date(data.expiryDate);
-      const diffDays = Math.ceil((targetDate.getTime() - REFERENCE_DATE.getTime()) / (1000 * 60 * 60 * 24));
-      
-      let status: 'valid' | 'expiring' | 'expired' = 'valid';
-      if (diffDays < 0) {
-        status = 'expired';
-      } else if (diffDays <= settings.daysThreshold) {
-        status = 'expiring';
-      }
-
-      const existingDoc = v.documents[docType];
-      const updatedDocs = {
-        ...v.documents,
-        [docType]: {
-          type: docType,
-          expiryDate: data.expiryDate,
-          number: data.number || existingDoc?.number,
-          notes: data.notes || existingDoc?.notes,
-          fileUrl: data.fileUrl || existingDoc?.fileUrl,
-          fileName: data.fileName || existingDoc?.fileName,
-          fileType: data.fileType || existingDoc?.fileType,
-          fileSize: data.fileSize || existingDoc?.fileSize,
-          uploadedAt: data.fileUrl ? new Date().toLocaleDateString('pt-BR') : existingDoc?.uploadedAt,
-          status,
+    setVehicles(prev => {
+      const updated = prev.map(v => {
+        if (v.id !== vehicleId) return v;
+        const targetDate = new Date(data.expiryDate);
+        const diffDays = Math.ceil((targetDate.getTime() - REFERENCE_DATE.getTime()) / (1000 * 60 * 60 * 24));
+        
+        let status: 'valid' | 'expiring' | 'expired' = 'valid';
+        if (diffDays < 0) {
+          status = 'expired';
+        } else if (diffDays <= settings.daysThreshold) {
+          status = 'expiring';
         }
-      };
 
-      // Also create/update an attachment entry if file was uploaded
-      let updatedAttachments = v.attachments ? [...v.attachments] : [];
-      if (data.fileUrl && data.fileName) {
-        const newAttachment: VehicleAttachment = {
-          id: `att-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
-          name: data.fileName,
-          dataUrl: data.fileUrl,
-          fileType: data.fileType || 'application/pdf',
-          fileSize: data.fileSize || 0,
-          category: docType,
-          number: data.number,
-          expiryDate: data.expiryDate,
-          notes: data.notes,
-          uploadedAt: new Date().toLocaleDateString('pt-BR'),
-          uploadedBy: currentUser ? `${currentUser.name} (${currentUser.role})` : 'Administrador',
+        const existingDoc = v.documents[docType];
+        const updatedDocs = {
+          ...v.documents,
+          [docType]: {
+            type: docType,
+            expiryDate: data.expiryDate,
+            number: data.number || existingDoc?.number,
+            notes: data.notes || existingDoc?.notes,
+            fileUrl: data.fileUrl || existingDoc?.fileUrl,
+            fileName: data.fileName || existingDoc?.fileName,
+            fileType: data.fileType || existingDoc?.fileType,
+            fileSize: data.fileSize || existingDoc?.fileSize,
+            uploadedAt: data.fileUrl ? new Date().toLocaleDateString('pt-BR') : existingDoc?.uploadedAt,
+            status,
+          }
         };
-        updatedAttachments = [newAttachment, ...updatedAttachments];
-      }
 
-      return { ...v, documents: updatedDocs, attachments: updatedAttachments };
-    }));
+        // Also create/update an attachment entry if file was uploaded
+        let updatedAttachments = v.attachments ? [...v.attachments] : [];
+        if (data.fileUrl && data.fileName) {
+          const newAttachment: VehicleAttachment = {
+            id: `att-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+            name: data.fileName,
+            dataUrl: data.fileUrl,
+            fileType: data.fileType || 'application/pdf',
+            fileSize: data.fileSize || 0,
+            category: docType,
+            number: data.number,
+            expiryDate: data.expiryDate,
+            notes: data.notes,
+            uploadedAt: new Date().toLocaleDateString('pt-BR'),
+            uploadedBy: currentUser ? `${currentUser.name} (${currentUser.role})` : 'Administrador',
+          };
+          updatedAttachments = [newAttachment, ...updatedAttachments];
+        }
+
+        return { ...v, documents: updatedDocs, attachments: updatedAttachments };
+      });
+      syncVehicleToSupabase(vehicleId, updated);
+      return updated;
+    });
   };
 
   const addVehicleAttachment = (vehicleId: string, attachment: Omit<VehicleAttachment, 'id' | 'uploadedAt'>) => {
-    setVehicles(prev => prev.map(v => {
-      if (v.id !== vehicleId) return v;
-      const newAtt: VehicleAttachment = {
-        ...attachment,
-        id: `att-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
-        uploadedAt: new Date().toLocaleDateString('pt-BR'),
-        uploadedBy: attachment.uploadedBy || (currentUser ? `${currentUser.name} (${currentUser.role})` : 'Administrador'),
-      };
-      const existing = v.attachments || [];
-      return {
-        ...v,
-        attachments: [newAtt, ...existing],
-      };
-    }));
+    setVehicles(prev => {
+      const updated = prev.map(v => {
+        if (v.id !== vehicleId) return v;
+        const newAtt: VehicleAttachment = {
+          ...attachment,
+          id: `att-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+          uploadedAt: new Date().toLocaleDateString('pt-BR'),
+          uploadedBy: attachment.uploadedBy || (currentUser ? `${currentUser.name} (${currentUser.role})` : 'Administrador'),
+        };
+        const existing = v.attachments || [];
+        return {
+          ...v,
+          attachments: [newAtt, ...existing],
+        };
+      });
+      syncVehicleToSupabase(vehicleId, updated);
+      return updated;
+    });
   };
 
   const removeVehicleAttachment = (vehicleId: string, attachmentId: string) => {
-    setVehicles(prev => prev.map(v => {
-      if (v.id !== vehicleId) return v;
-      return {
-        ...v,
-        attachments: (v.attachments || []).filter(a => a.id !== attachmentId),
-      };
-    }));
+    setVehicles(prev => {
+      const updated = prev.map(v => {
+        if (v.id !== vehicleId) return v;
+        return {
+          ...v,
+          attachments: (v.attachments || []).filter(a => a.id !== attachmentId),
+        };
+      });
+      syncVehicleToSupabase(vehicleId, updated);
+      return updated;
+    });
   };
 
   const calculateEquipmentStatus = (nextCalibrationDate?: string): 'valid' | 'expiring' | 'expired' => {
@@ -754,59 +920,79 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   };
 
   const addVehicleEquipment = (vehicleId: string, equipment: Omit<VehicleEquipment, 'id'>) => {
-    setVehicles(prev => prev.map(v => {
-      if (v.id !== vehicleId) return v;
-      const effectiveDate = equipment.nextCalibrationDate || equipment.calibrationDate;
-      const status = calculateEquipmentStatus(effectiveDate);
-      const newEq: VehicleEquipment = {
-        ...equipment,
-        id: `eq-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
-        status: equipment.status || status,
-        uploadedAt: equipment.fileUrl ? (equipment.uploadedAt || new Date().toLocaleDateString('pt-BR')) : undefined,
-        uploadedBy: equipment.uploadedBy || (currentUser ? `${currentUser.name} (${currentUser.role})` : 'Administrador'),
-      };
+    setVehicles(prev => {
+      const updated = prev.map(v => {
+        if (v.id !== vehicleId) return v;
+        const effectiveDate = equipment.nextCalibrationDate || equipment.calibrationDate;
+        const status = calculateEquipmentStatus(effectiveDate);
+        const newEq: VehicleEquipment = {
+          ...equipment,
+          id: `eq-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+          status: equipment.status || status,
+          uploadedAt: equipment.fileUrl ? (equipment.uploadedAt || new Date().toLocaleDateString('pt-BR')) : undefined,
+          uploadedBy: equipment.uploadedBy || (currentUser ? `${currentUser.name} (${currentUser.role})` : 'Administrador'),
+        };
 
-      if (status === 'expired' || status === 'expiring') {
-        const diffDays = Math.abs(getDaysDifference(effectiveDate));
-        setActiveBanner({
-          id: `alert-eq-${Date.now()}`,
-          type: 'doc_warning',
-          title: status === 'expired' ? `🚨 Calibração Vencida!` : `⚠️ Calibração Vencendo em ${diffDays}d!`,
-          message: `Equipamento "${equipment.description}" (${equipment.tag || 'S/TAG'}) na Frota ${v.fleetNumber} está ${status === 'expired' ? 'com calibração vencida' : `vencendo em ${diffDays} dia(s)`}. Alerta registrado no sistema.`,
-          code: equipment.tag || 'EQUIPAMENTO',
-          vehicleFleet: v.fleetNumber,
-        });
-      }
+        if (status === 'expired' || status === 'expiring') {
+          const diffDays = Math.abs(getDaysDifference(effectiveDate));
+          setActiveBanner({
+            id: `alert-eq-${Date.now()}`,
+            type: 'doc_warning',
+            title: status === 'expired' ? `🚨 Calibração Vencida!` : `⚠️ Calibração Vencendo em ${diffDays}d!`,
+            message: `Equipamento "${equipment.description}" (${equipment.tag || 'S/TAG'}) na Frota ${v.fleetNumber} está ${status === 'expired' ? 'com calibração vencida' : `vencendo em ${diffDays} dia(s)`}. Alerta registrado no sistema.`,
+            code: equipment.tag || 'EQUIPAMENTO',
+            vehicleFleet: v.fleetNumber,
+          });
+        }
 
-      const existing = v.equipments || [];
-      return {
-        ...v,
-        equipments: [newEq, ...existing],
-      };
-    }));
+        const existing = v.equipments || [];
+        return {
+          ...v,
+          equipments: [newEq, ...existing],
+        };
+      });
+      syncVehicleToSupabase(vehicleId, updated);
+      return updated;
+    });
   };
 
   const updateVehicleEquipment = (vehicleId: string, equipmentId: string, updates: Partial<VehicleEquipment>) => {
-    setVehicles(prev => prev.map(v => {
-      if (v.id !== vehicleId) return v;
-      const existing = v.equipments || [];
-      const updatedEquipments = existing.map(eq => {
-        if (eq.id !== equipmentId) return eq;
-        const merged = { ...eq, ...updates };
-        const effectiveDate = updates.nextCalibrationDate || merged.nextCalibrationDate || updates.calibrationDate || merged.calibrationDate;
-        if (effectiveDate) {
-          merged.status = calculateEquipmentStatus(effectiveDate);
-        }
-        return merged;
+    setVehicles(prev => {
+      const updated = prev.map(v => {
+        if (v.id !== vehicleId) return v;
+        const existing = v.equipments || [];
+        const updatedEquipments = existing.map(eq => {
+          if (eq.id !== equipmentId) return eq;
+          const merged = { ...eq, ...updates };
+          const effectiveDate = updates.nextCalibrationDate || merged.nextCalibrationDate || updates.calibrationDate || merged.calibrationDate;
+          if (effectiveDate) {
+            merged.status = calculateEquipmentStatus(effectiveDate);
+          }
+          return merged;
+        });
+        return {
+          ...v,
+          equipments: updatedEquipments,
+        };
       });
-      return {
-        ...v,
-        equipments: updatedEquipments,
-      };
-    }));
+      syncVehicleToSupabase(vehicleId, updated);
+      return updated;
+    });
   };
 
   const deleteVehicleEquipment = (vehicleId: string, equipmentId: string) => {
+    setVehicles(prev => {
+      const updated = prev.map(v => {
+        if (v.id !== vehicleId) return v;
+        return {
+          ...v,
+          equipments: (v.equipments || []).filter(e => e.id !== equipmentId),
+        };
+      });
+      syncVehicleToSupabase(vehicleId, updated);
+      return updated;
+    });
+  };
     setVehicles(prev => prev.map(v => {
       if (v.id !== vehicleId) return v;
       return {
@@ -959,6 +1145,10 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       category: newOS.category,
     });
 
+    SupabaseService.upsertServiceOrder(newOS).catch(err => {
+      console.debug('Supabase open OS background notice:', err?.message);
+    });
+
     return newOS;
   };
 
@@ -1041,10 +1231,23 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         images: mergedImages,
       };
     }));
+
+    // Sincronizar atualização de status no Supabase em segundo plano
+    setTimeout(() => {
+      const target = serviceOrders.find(o => o.id === id);
+      if (target) {
+        SupabaseService.upsertServiceOrder({ ...target, status, resolutionNotes: notes || target.resolutionNotes }).catch(err => {
+          console.debug('Supabase update status background notice:', err?.message);
+        });
+      }
+    }, 50);
   };
 
   const deleteServiceOrder = (id: string) => {
     setServiceOrders(prev => prev.filter(os => os.id !== id));
+    SupabaseService.deleteServiceOrder(id).catch(err => {
+      console.debug('Supabase delete OS background notice:', err?.message);
+    });
   };
 
   const markNotificationAsRead = (id: string) => {
@@ -1400,10 +1603,12 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       logout,
       switchUser,
       users,
+      setUsers,
       addUser,
       updateUser,
       deleteUser,
       vehicles,
+      setVehicles,
       addVehicle,
       updateVehicle,
       deleteVehicle,
@@ -1415,6 +1620,7 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       updateVehicleEquipment,
       deleteVehicleEquipment,
       serviceOrders,
+      setServiceOrders,
       openServiceOrder,
       updateServiceOrderStatus,
       deleteServiceOrder,
