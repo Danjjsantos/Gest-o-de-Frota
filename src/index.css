@@ -31,26 +31,93 @@
 }
 
 @media print {
+  @page {
+    size: auto;
+    margin: 10mm 8mm 12mm 8mm;
+  }
+
+  html, 
+  body, 
+  #root, 
+  #root > div, 
+  .h-screen, 
+  .min-h-screen {
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow: visible !important;
+    position: static !important;
+    float: none !important;
+    box-shadow: none !important;
+  }
+
   body {
     background: #ffffff !important;
-    color: #000000 !important;
+    color: #0f172a !important;
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
+    font-size: 11px !important;
   }
-  aside, header, button, .print\:hidden {
+
+  /* Expand all flex containers and remove height limitations */
+  div, section, article, main {
+    overflow: visible !important;
+    max-height: none !important;
+  }
+
+  /* Hide UI chrome in print */
+  aside, 
+  header, 
+  nav, 
+  button:not(.allow-print), 
+  .print\:hidden, 
+  [role="dialog"], 
+  [aria-modal="true"] {
     display: none !important;
   }
+
+  /* Make main content flow across all pages naturally */
   main {
     overflow: visible !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
     padding: 0 !important;
     margin: 0 !important;
+    display: block !important;
+    width: 100% !important;
+    background: transparent !important;
   }
+
+  /* Tables formatting for print */
   table {
     page-break-inside: auto;
+    width: 100% !important;
+    border-collapse: collapse !important;
+    font-size: 9.5px !important;
   }
+
+  thead {
+    display: table-header-group !important;
+  }
+
   tr {
-    page-break-inside: avoid;
-    page-break-after: auto;
+    page-break-inside: avoid !important;
+    page-break-after: auto !important;
+  }
+
+  th, td {
+    padding: 4px 6px !important;
+  }
+
+  .print-page-break {
+    page-break-before: always !important;
+    break-before: page !important;
+  }
+
+  .print-avoid-break {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
   }
 }
 

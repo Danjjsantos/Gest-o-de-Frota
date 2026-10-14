@@ -10,8 +10,7 @@ import {
   ChevronRight,
   Plus,
   X,
-  KeyRound,
-  Database
+  KeyRound
 } from 'lucide-react';
 import { useFleet } from '../context/FleetContext';
 import { MyProfileModal } from './modals/MyProfileModal';
@@ -188,28 +187,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
               >
                 <Plus className="w-4 h-4 stroke-[3]" />
                 <span>Nova Ordem de Serviço</span>
-              </button>
-            </div>
-          )}
-
-          {/* Supabase Database Hub Button */}
-          {onOpenSupabase && (
-            <div className="pt-2">
-              <button
-                onClick={() => {
-                  onOpenSupabase();
-                  onClose();
-                }}
-                className="w-full flex items-center justify-between gap-2 bg-emerald-950/40 hover:bg-emerald-900/50 text-emerald-300 border border-emerald-500/30 hover:border-emerald-500/60 py-2 px-3 rounded-xl text-xs font-semibold shadow-sm transition active:scale-95"
-                title="Gerenciar tabelas e sincronização com Supabase"
-              >
-                <div className="flex items-center gap-2">
-                  <Database className="w-3.5 h-3.5 text-emerald-400" />
-                  <span>Banco Supabase</span>
-                </div>
-                <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-200 border border-emerald-500/30">
-                  SQL
-                </span>
               </button>
             </div>
           )}

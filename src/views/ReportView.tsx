@@ -1,6 +1,5 @@
 import React, { useState, useMemo } from 'react';
 import { 
-  Printer, 
   Download, 
   FileText, 
   Check, 
@@ -23,7 +22,8 @@ import {
   UserCheck,
   FileSpreadsheet,
   BarChart3,
-  Gauge
+  Gauge,
+  ChevronDown
 } from 'lucide-react';
 import { useFleet, getDaysDifference, formatDisplayDate } from '../context/FleetContext';
 import { Vehicle, DocumentType, OSCategory, ServiceOrder } from '../types';
@@ -96,10 +96,6 @@ export const ReportView: React.FC = () => {
   }, [vehicles, serviceOrders]);
 
   const displayVehicles = activeFilter === 'all' ? vehicles : pendingVehicles;
-
-  const handlePrint = () => {
-    window.print();
-  };
 
   const handleExportDashboardPDF = () => {
     const filename = generateDashboardPDF(
@@ -219,15 +215,6 @@ export const ReportView: React.FC = () => {
                 <span>Exportar Relatório Geral em PDF</span>
               </button>
             )}
-
-            <button
-              onClick={handlePrint}
-              className="flex items-center gap-2 bg-slate-900 hover:bg-slate-800 text-white px-4 py-2.5 rounded-xl text-xs font-bold shadow-md transition"
-              title="Imprimir ou salvar via diálogo do navegador"
-            >
-              <Printer className="w-4 h-4" />
-              <span>Imprimir</span>
-            </button>
           </div>
         </div>
 
@@ -275,7 +262,7 @@ export const ReportView: React.FC = () => {
       {/* TAB 1: RELATÓRIO DO DASHBOARD                                            */}
       {/* ========================================================================= */}
       {activeTab === 'dashboard' && (
-        <div className="bg-white rounded-2xl p-8 border border-slate-200/80 shadow-xs print:border-none print:shadow-none print:p-0 space-y-8">
+        <div className="bg-white rounded-2xl p-8 border border-slate-200/80 shadow-xs space-y-8">
           {/* Header */}
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b-2 border-slate-900">
             <div className="flex items-center gap-3">
@@ -1003,7 +990,7 @@ export const ReportView: React.FC = () => {
       {/* TAB 3: VISÃO CONSOLIDADA DA FROTA                                         */}
       {/* ========================================================================= */}
       {activeTab === 'fleet_summary' && (
-        <div className="bg-white rounded-2xl p-8 border border-slate-200/80 shadow-xs print:border-none print:shadow-none print:p-0 space-y-8">
+        <div className="bg-white rounded-2xl p-8 border border-slate-200/80 shadow-xs space-y-8">
           {/* Controls Bar for filters */}
           <div className="flex items-center justify-between gap-4 pb-4 border-b border-slate-200 print:hidden">
             <div className="flex items-center gap-2">

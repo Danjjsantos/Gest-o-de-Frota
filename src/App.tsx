@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useMemo } from 'react';
-import { Menu, Truck, Database } from 'lucide-react';
+import { Menu, Truck } from 'lucide-react';
 import { FleetProvider, useFleet } from './context/FleetContext';
 import { Sidebar, ActiveTab } from './components/Sidebar';
 import { AlertBanner } from './components/AlertBanner';
@@ -75,9 +75,9 @@ function MainApp() {
   };
 
   return (
-    <div className="flex flex-col h-screen bg-[#f8fafc] text-slate-800 antialiased overflow-hidden font-sans">
+    <div className="flex flex-col h-screen bg-[#f8fafc] text-slate-800 antialiased overflow-hidden font-sans print:h-auto print:min-h-0 print:overflow-visible print:bg-white print:block">
       {/* Cabeçalho Superior */}
-      <header className="h-16 bg-[#0f172a] border-b border-slate-800/90 px-4 sm:px-6 flex items-center justify-between z-30 shrink-0 select-none shadow-md">
+      <header className="h-16 bg-[#0f172a] border-b border-slate-800/90 px-4 sm:px-6 flex items-center justify-between z-30 shrink-0 select-none shadow-md print:hidden">
         {/* Esquerda: Ícone Laranja com Caminhão + GESTÃO FROTAS */}
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-[#ea580c] to-[#ff5500] flex items-center justify-center text-white shadow-md shadow-orange-950/40 shrink-0">
@@ -88,17 +88,8 @@ function MainApp() {
           </h1>
         </div>
 
-        {/* Direita: Acesso Supabase + Menu Hamburger */}
+        {/* Direita: Menu Hamburger */}
         <div className="flex items-center gap-2 sm:gap-3">
-          <button
-            onClick={() => setIsSupabaseModalOpen(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-emerald-950/60 hover:bg-emerald-900/80 text-emerald-300 border border-emerald-500/30 transition shadow-sm cursor-pointer active:scale-95"
-            title="Banco de Dados Supabase (Tabelas e Sincronização)"
-          >
-            <Database className="w-4 h-4 text-emerald-400" />
-            <span className="hidden sm:inline">Supabase</span>
-          </button>
-
           <button
             onClick={() => setIsMenuOpen(true)}
             className="p-2 rounded-xl text-slate-200 hover:text-white hover:bg-slate-800 transition active:scale-95 flex items-center justify-center cursor-pointer"
@@ -111,16 +102,20 @@ function MainApp() {
       </header>
 
       {/* Floating Alert Banner for new OS and urgent document alerts */}
-      <AlertBanner 
-        onNavigateToOS={() => setActiveTab('os')} 
-        onNavigateToFleet={() => setActiveTab('frotas')} 
-      />
+      <div className="print:hidden">
+        <AlertBanner 
+          onNavigateToOS={() => setActiveTab('os')} 
+          onNavigateToFleet={() => setActiveTab('frotas')} 
+        />
+      </div>
 
       {/* Pop-up Crítico e Alertas Visuais para o Gestor (< 7 dias) */}
-      <CriticalExpirationsPopup
-        onNavigateToNotifications={() => setActiveTab('notificacoes')}
-        onNavigateToFleet={() => setActiveTab('frotas')}
-      />
+      <div className="print:hidden">
+        <CriticalExpirationsPopup
+          onNavigateToNotifications={() => setActiveTab('notificacoes')}
+          onNavigateToFleet={() => setActiveTab('frotas')}
+        />
+      </div>
 
       {/* Menu Lateral Oculto nos Três Traços (Gaveta / Drawer) */}
       <Sidebar 
@@ -129,12 +124,11 @@ function MainApp() {
         activeTab={activeTab} 
         setActiveTab={setActiveTab} 
         onOpenNewOS={() => setIsNewOSModalOpen(true)}
-        onOpenSupabase={() => setIsSupabaseModalOpen(true)}
       />
 
       {/* Content Area */}
-      <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-        <main className="flex-1 overflow-y-auto custom-scrollbar bg-[#f8fafc]">
+      <div className="flex-1 flex flex-col min-w-0 overflow-hidden print:h-auto print:min-h-0 print:overflow-visible print:block">
+        <main className="flex-1 overflow-y-auto custom-scrollbar bg-[#f8fafc] print:h-auto print:min-h-0 print:overflow-visible print:bg-white print:p-0 print:block">
           {activeTab === 'dashboard' && (
             <DashboardView
               onNavigateToFleet={() => setActiveTab('frotas')}

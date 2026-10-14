@@ -29,6 +29,7 @@ interface DashboardViewProps {
   onSelectOS: (os: ServiceOrder) => void;
   onNavigateToNotifications: () => void;
   onOpenNewOS?: () => void;
+  onNavigateToReport?: () => void;
 }
 
 export const DashboardView: React.FC<DashboardViewProps> = ({
@@ -37,6 +38,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   onSelectOS,
   onNavigateToNotifications,
   onOpenNewOS,
+  onNavigateToReport,
 }) => {
   const { 
     stats, 
@@ -146,7 +148,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
               <button
                 onClick={handleExportPDF}
-                className={`flex items-center gap-2 px-3.5 py-2.5 rounded-xl text-xs font-bold transition shadow-xs border ${
+                className={`flex items-center gap-2 px-3.5 py-2.5 rounded-xl text-xs font-bold transition shadow-xs border cursor-pointer active:scale-95 ${
                   downloadSuccess
                     ? 'bg-emerald-600 text-white border-emerald-600'
                     : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'

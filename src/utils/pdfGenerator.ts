@@ -1,6 +1,6 @@
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { Vehicle, ServiceOrder, User, OSCategory, DocumentType } from '../types';
+import { Vehicle, ServiceOrder, User, OSCategory, DocumentType, getVacuumClassification } from '../types';
 
 interface FleetStatsShape {
   totalVehicles: number;
@@ -205,6 +205,136 @@ export const generateDashboardPDF = (
         }
       }
     }
+  });
+
+  // @ts-ignore
+  currentY = doc.lastAutoTable.finalY + 8;
+
+  // SECTION 4: Indicadores de Saúde Operacional & Performance
+  if (currentY > 215) {
+    doc.addPage();
+    currentY = 16;
+  }
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(11);
+  doc.setTextColor(30, 41, 59);
+  doc.text('4. INDICADORES DE SAÚDE OPERACIONAL E DISPONIBILIDADE DA FROTA', 10, currentY);
+  currentY += 4;
+
+  const total = vehicles.length || 1;
+  const activeCountVal = vehicles.filter(v => v.status === 'Ativo').length;
+  const maintenanceCountVal = vehicles.filter(v => v.status === 'Em Manutenção').length;
+  const vehiclesWithPendingOS = vehicles.filter(v =>
+    serviceOrders.some(os => (os.vehicleId === v.id || os.fleetNumber === v.fleetNumber) && (os.status === 'Aberta' || os.status === 'Em andamento'))
+  ).length;
+  const expiredVehiclesCount = new Set(expiredDocs.map(item => item.vehicle.id)).size;
+  const compliantVehicles = Math.max(0, total - expiredVehiclesCount);
+
+  autoTable(doc, {
+    startY: currentY,
+    margin: { left: 10, right: 10 },
+    theme: 'grid',
+    styles: { fontSize: 8.5, cellPadding: 2.8 },
+    headStyles: { fillColor: [15, 23, 42], textColor: [255, 255, 255], fontStyle: 'bold' },
+    head: [['Indicador de Performance', 'Índice Apurado', 'Frotas Atingidas', 'Meta / Parâmetro Operacional']],
+    body: [
+      ['Taxa de Disponibilidade Geral da Frota', `${Math.round((activeCountVal / total) * 100)}%`, `${activeCountVal} de ${total} frotas`, 'Meta: >= 90% operacional'],
+      ['Índice de Conformidade Documental', `${Math.round((compliantVehicles / total) * 100)}%`, `${compliantVehicles} de ${total} regulares`, 'Meta: 100% sem vencimentos'],
+      ['Frotas sem Ocorrências / OS Pendentes', `${Math.round(((total - vehiclesWithPendingOS) / total) * 100)}%`, `${total - vehiclesWithPendingOS} de ${total} frotas`, 'Sem chamados corretivos abertos'],
+      ['Imobilização Técnica (Manutenção)', `${Math.round((maintenanceCountVal / total) * 100)}%`, `${maintenanceCountVal} frota(s)`, 'Manutenção Corretiva / Preventiva em curso'],
+    ],
+  });
+
+  // @ts-ignore
+  currentY = doc.lastAutoTable.finalY + 8;
+
+  // SECTION 5: Monitoramento de Vácuo das Carretas Criogênicas (Gases do Ar)
+  if (currentY > 215) {
+    doc.addPage();
+    currentY = 16;
+  }
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(11);
+  doc.setTextColor(30, 41, 59);
+  doc.text('5. MONITORAMENTO DE VÁCUO DAS CARRETAS CRIOGÊNICAS (GASES DO AR)', 10, currentY);
+  currentY += 4;
+
+  const cryogenicVehicles = vehicles.filter(v =>
+    v.type === 'Carreta' ||
+    (v.cargoProducts && v.cargoProducts.some(p => p.includes('Gases do Ar'))) ||
+    (v.cargoProduct && v.cargoProduct.includes('Gases do Ar')) ||
+    v.vacuumValue !== undefined
+  );
+
+  const vacuumRows = cryogenicVehicles.map(v => {
+    const val = v.vacuumValue !== undefined ? String(v.vacuumValue) : '';
+    const classification = getVacuumClassification(val);
+    return [
+      v.fleetNumber,
+      `${v.plate}/${v.uf}`,
+      `${v.brand} ${v.model}`,
+      v.cargoProduct || (v.cargoProducts && v.cargoProducts.join(', ')) || 'Gases do Ar (LO2/LN2/LAR)',
+      val ? `${val} ${v.vacuumUnit || 'mtorr'}` : 'Pendente',
+      v.vacuumDate ? formatDate(v.vacuumDate) : '—',
+      classification.label || (val ? 'Conforme' : 'Aguardando')
+    ];
+  });
+
+  if (vacuumRows.length === 0) {
+    vacuumRows.push(['—', '—', '—', 'Nenhuma carreta criogênica cadastrada', '—', '—', 'Normal']);
+  }
+
+  autoTable(doc, {
+    startY: currentY,
+    margin: { left: 10, right: 10 },
+    theme: 'grid',
+    styles: { fontSize: 8, cellPadding: 2.5 },
+    headStyles: { fillColor: [37, 99, 235], textColor: [255, 255, 255], fontStyle: 'bold' },
+    head: [['Frota', 'Placa/UF', 'Modelo', 'Carga / Produto', 'Nível de Vácuo', 'Data Medição', 'Status Isolamento']],
+    body: vacuumRows,
+  });
+
+  // @ts-ignore
+  currentY = doc.lastAutoTable.finalY + 8;
+
+  // SECTION 6: Relação de Ordens de Serviço em Aberto / Em Andamento
+  if (currentY > 215) {
+    doc.addPage();
+    currentY = 16;
+  }
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(11);
+  doc.setTextColor(30, 41, 59);
+  doc.text('6. RELAÇÃO DE ORDENS DE SERVIÇO EM ABERTO E EM ANDAMENTO', 10, currentY);
+  currentY += 4;
+
+  const openOrders = serviceOrders.filter(os => os.status === 'Aberta' || os.status === 'Em andamento');
+  const osRows = openOrders.map(os => [
+    os.code,
+    os.fleetNumber,
+    os.title,
+    os.category,
+    os.priority,
+    os.assignedToName || 'Equipe de Manutenção',
+    os.createdAt ? formatDate(os.createdAt.slice(0, 10)) : '—',
+    os.status
+  ]);
+
+  if (osRows.length === 0) {
+    osRows.push(['—', '—', 'Nenhuma OS aberta no momento. Todas as frotas em dia!', '—', '—', '—', '—', 'Conforme']);
+  }
+
+  autoTable(doc, {
+    startY: currentY,
+    margin: { left: 10, right: 10 },
+    theme: 'grid',
+    styles: { fontSize: 7.8, cellPadding: 2.4 },
+    headStyles: { fillColor: [255, 85, 0], textColor: [255, 255, 255], fontStyle: 'bold' },
+    head: [['Código OS', 'Frota', 'Defeito / Ocorrência', 'Categoria', 'Prioridade', 'Responsável', 'Abertura', 'Status']],
+    body: osRows,
   });
 
   // Page numbering on all pages
