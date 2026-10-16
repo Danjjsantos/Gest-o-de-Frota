@@ -14,7 +14,7 @@ export type VacuumClassification = 'normal' | 'warning' | 'critical';
 
 export const getVacuumClassification = (val: number | string | undefined): {
   type: VacuumClassification;
-  label: string;
+  label: 'Especificado' | 'Fora do Especificado' | 'ATM' | 'Sem medição';
   color: string;
   badgeClass: string;
 } => {
@@ -30,7 +30,7 @@ export const getVacuumClassification = (val: number | string | undefined): {
   if (num <= 80) {
     return {
       type: 'normal',
-      label: 'Dentro do especificado (≤ 80 mtorr)',
+      label: 'Especificado',
       color: '#10b981', // Verde
       badgeClass: 'bg-emerald-50 text-emerald-800 border-emerald-200'
     };
@@ -38,14 +38,14 @@ export const getVacuumClassification = (val: number | string | undefined): {
   if (num <= 998) {
     return {
       type: 'warning',
-      label: 'Fora do especificado (81 - 998 mtorr)',
+      label: 'Fora do Especificado',
       color: '#f59e0b', // Amarela
       badgeClass: 'bg-amber-50 text-amber-800 border-amber-200'
     };
   }
   return {
     type: 'critical',
-    label: 'ATM - Perda de Vácuo (≥ 999 mtorr)',
+    label: 'ATM',
     color: '#ef4444', // Vermelha
     badgeClass: 'bg-rose-50 text-rose-800 border-rose-200'
   };

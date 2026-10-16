@@ -15,11 +15,13 @@ import {
   Lock,
   ShieldAlert,
   Users,
-  UserCheck
+  UserCheck,
+  Trash2
 } from 'lucide-react';
 import { ServiceOrder, OSStatus } from '../../types';
 import { useFleet } from '../../context/FleetContext';
 import { PriorityBadge } from '../PriorityBadge';
+import { ConfirmDeleteModal } from './ConfirmDeleteModal';
 
 interface ServiceOrderDetailModalProps {
   os: ServiceOrder | null;
@@ -32,7 +34,9 @@ export const ServiceOrderDetailModal: React.FC<ServiceOrderDetailModalProps> = (
   isOpen,
   onClose,
 }) => {
-  const { updateServiceOrderStatus, currentUser, canCloseOS, settings } = useFleet();
+  const { updateServiceOrderStatus, deleteServiceOrder, currentUser, canCloseOS, settings } = useFleet();
+  const isAdministrator = currentUser?.role === 'Administrador';
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [status, setStatus] = useState<OSStatus>(os?.status || 'Aberta');
   const [resolutionNotes, setResolutionNotes] = useState(os?.resolutionNotes || '');
   const [executorName, setExecutorName] = useState(os?.executedByName || os?.assignedToName || '');
@@ -506,12 +510,25 @@ export const ServiceOrderDetailModal: React.FC<ServiceOrderDetailModalProps> = (
 
           {/* Fixed Footer */}
           <div className="p-4 border-t border-slate-100 bg-slate-50 flex items-center justify-between shrink-0">
-            {isAlreadyClosed ? (
-              <span className="text-[11px] text-slate-500 font-medium flex items-center gap-1.5">
-                <Lock className="w-3.5 h-3.5 text-slate-400" />
-                Ordem de serviço encerrada (somente visualização)
-              </span>
-            ) : <div />}
+            <div className="flex items-center gap-2">
+              {isAdministrator && (
+                <button
+                  type="button"
+                  onClick={() => setShowDeleteModal(true)}
+                  className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-rose-600 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-xl transition cursor-pointer"
+                  title="Excluir esta Ordem de Serviço permanentemente"
+                >
+                  <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+                  <span>Excluir OS</span>
+                </button>
+              )}
+              {isAlreadyClosed && (
+                <span className="text-[11px] text-slate-500 font-medium flex items-center gap-1.5">
+                  <Lock className="w-3.5 h-3.5 text-slate-400" />
+                  Encerrada (somente leitura)
+                </span>
+              )}
+            </div>
 
             <div className="flex items-center gap-2">
               <button
@@ -538,6 +555,23 @@ export const ServiceOrderDetailModal: React.FC<ServiceOrderDetailModalProps> = (
           </div>
         </div>
       </div>
+
+      {/* Modal: Confirmar Exclusão de OS */}
+      <ConfirmDeleteModal
+        isOpen={showDeleteModal}
+        onClose={() => setShowDeleteModal(false)}
+        onConfirm={() => {
+          deleteServiceOrder(os.id);
+          setShowDeleteModal(false);
+          onClose();
+        }}
+        title="Excluir Ordem de Serviço"
+        itemCategory="Manutenção / OS"
+        itemName={`OS #${os.code} - ${os.title}`}
+        description={`Tem certeza que deseja excluir permanentemente a Ordem de Serviço #${os.code}? Todos os registros, fotos anexadas e notas serão removidos.`}
+        warningNote="Esta ação é irreversível e excluirá a OS da base de dados."
+        confirmButtonText="Excluir OS"
+      />
 
       {/* Lightbox Modal */}
       {activeLightboxImage && (

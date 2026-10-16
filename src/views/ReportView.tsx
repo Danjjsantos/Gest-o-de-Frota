@@ -26,7 +26,7 @@ import {
   ChevronDown
 } from 'lucide-react';
 import { useFleet, getDaysDifference, formatDisplayDate } from '../context/FleetContext';
-import { Vehicle, DocumentType, OSCategory, ServiceOrder } from '../types';
+import { Vehicle, DocumentType, OSCategory, ServiceOrder, getVacuumClassification } from '../types';
 import { 
   generateDashboardPDF, 
   generateVehicleDossierPDF, 
@@ -96,6 +96,24 @@ export const ReportView: React.FC = () => {
   }, [vehicles, serviceOrders]);
 
   const displayVehicles = activeFilter === 'all' ? vehicles : pendingVehicles;
+
+  // Carretas exclusivas de Gases do Ar (LO2, LN2, LAR) para monitoramento de vácuo (excluindo tipo CO2)
+  const vacuumCarretasGasesDoAr = useMemo(() => {
+    return vehicles.filter(v => {
+      // 1. Deve ser Carreta
+      if (v.type !== 'Carreta') return false;
+
+      // 2. Não pode ser veículo do tipo CO2
+      const isCO2 = (v.cargoProduct && v.cargoProduct.includes('CO2')) || 
+                    (v.cargoProducts && v.cargoProducts.some(p => p.includes('CO2')));
+      if (isCO2) return false;
+
+      // 3. Deve transportar Gases do Ar (LO2, LN2, LAR)
+      const isGasesDoAr = (v.cargoProduct && v.cargoProduct.includes('Gases do Ar')) ||
+                          (v.cargoProducts && v.cargoProducts.some(p => p.includes('Gases do Ar')));
+      return isGasesDoAr;
+    });
+  }, [vehicles]);
 
   const handleExportDashboardPDF = () => {
     const filename = generateDashboardPDF(
@@ -495,10 +513,10 @@ export const ReportView: React.FC = () => {
               })}
             </div>
 
-            {/* Tabela de OS Recentes ou Abertas do Dashboard */}
+            {/* 4. Ordens de Serviço em Aberto / Em Andamento */}
             <div className="mt-4">
               <h4 className="text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-2">
-                Ocorrências em Aberto que Demandam Ação
+                4. Ocorrências e Ordens de Serviço em Aberto
               </h4>
               <div className="overflow-x-auto rounded-xl border border-slate-200">
                 <table className="w-full text-left text-xs border-collapse">
@@ -542,6 +560,70 @@ export const ReportView: React.FC = () => {
                   </tbody>
                 </table>
               </div>
+            </div>
+          </div>
+
+          {/* 5. Monitoramento de Vácuo das Carretas Criogênicas (Gases do Ar) */}
+          <div className="space-y-3 pt-4 border-t border-slate-100">
+            <div className="flex items-center justify-between">
+              <h3 className="text-xs font-black uppercase tracking-wider text-slate-900 flex items-center gap-2">
+                <Gauge className="w-4 h-4 text-blue-600" />
+                <span>5. Monitoramento de Vácuo das Carretas Criogênicas (Gases do Ar)</span>
+              </h3>
+              <span className="text-xs font-semibold text-slate-500">
+                Carretas Gases do Ar: <strong className="text-slate-900 font-mono">{vacuumCarretasGasesDoAr.length}</strong> (Excluído tipo CO2)
+              </span>
+            </div>
+
+            <div className="overflow-x-auto rounded-xl border border-slate-200">
+              <table className="w-full text-left text-xs border-collapse">
+                <thead>
+                  <tr className="bg-slate-900 text-white text-[10px] uppercase font-bold tracking-wider">
+                    <th className="py-2.5 px-3">Frota</th>
+                    <th className="py-2.5 px-3">Placa/UF</th>
+                    <th className="py-2.5 px-3">Modelo</th>
+                    <th className="py-2.5 px-3">Carga / Produto</th>
+                    <th className="py-2.5 px-3 text-center">Nível de Vácuo</th>
+                    <th className="py-2.5 px-3 text-center">Data Medição</th>
+                    <th className="py-2.5 px-3 text-left">Status de Isolamento</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 bg-white font-sans">
+                  {vacuumCarretasGasesDoAr.map(v => {
+                    const val = v.vacuumValue !== undefined && v.vacuumValue !== '' ? String(v.vacuumValue) : '';
+                    const classification = getVacuumClassification(val);
+                    const statusText = val ? classification.label : 'Sem medição';
+                    return (
+                      <tr key={`vac-${v.id}`} className="hover:bg-slate-50">
+                        <td className="py-2.5 px-3 font-mono font-bold text-slate-900">{v.fleetNumber}</td>
+                        <td className="py-2.5 px-3 font-mono text-slate-700">{v.plate}/{v.uf}</td>
+                        <td className="py-2.5 px-3 font-medium text-slate-800">{v.brand} {v.model}</td>
+                        <td className="py-2.5 px-3 text-slate-600">
+                          {v.cargoProduct || (v.cargoProducts && v.cargoProducts.join(', ')) || 'Gases do Ar (LO2, LN2, LAR)'}
+                        </td>
+                        <td className="py-2.5 px-3 text-center font-mono font-bold text-indigo-700">
+                          {val ? `${val} ${v.vacuumUnit || 'mtorr'}` : <span className="text-slate-300 font-normal">Pendente</span>}
+                        </td>
+                        <td className="py-2.5 px-3 text-center font-mono text-slate-600">
+                          {v.vacuumDate ? v.vacuumDate.split('-').reverse().join('/') : '—'}
+                        </td>
+                        <td className="py-2.5 px-3 text-left whitespace-normal break-words">
+                          <span className={`inline-block px-2.5 py-1 rounded-md text-[11px] font-bold border text-left leading-tight ${classification.badgeClass}`}>
+                            {statusText}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {vacuumCarretasGasesDoAr.length === 0 && (
+                    <tr>
+                      <td colSpan={7} className="py-6 text-center text-slate-400 text-xs">
+                        Nenhuma carreta criogênica de Gases do Ar cadastrada.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
             </div>
           </div>
 

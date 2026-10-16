@@ -261,39 +261,85 @@ export const generateDashboardPDF = (
   doc.text('5. MONITORAMENTO DE VÁCUO DAS CARRETAS CRIOGÊNICAS (GASES DO AR)', 10, currentY);
   currentY += 4;
 
-  const cryogenicVehicles = vehicles.filter(v =>
-    v.type === 'Carreta' ||
-    (v.cargoProducts && v.cargoProducts.some(p => p.includes('Gases do Ar'))) ||
-    (v.cargoProduct && v.cargoProduct.includes('Gases do Ar')) ||
-    v.vacuumValue !== undefined
-  );
+  // Filtrar estritamente Carretas que transportam Gases do Ar (LO2, LN2, LAR)
+  // O vácuo é exclusivo para carretas de Gases do Ar — não selecionar veículos de CO2
+  const cryogenicVehicles = vehicles.filter(v => {
+    // 1. Deve ser do tipo Carreta
+    if (v.type !== 'Carreta') return false;
+
+    // 2. Não selecionar veículos do tipo CO2
+    const isCO2 = (v.cargoProduct && v.cargoProduct.includes('CO2')) ||
+                  (v.cargoProducts && v.cargoProducts.some(p => p.includes('CO2')));
+    if (isCO2) return false;
+
+    // 3. Deve transportar Gases do Ar (LO2, LN2, LAR)
+    const isGasesDoAr = (v.cargoProduct && v.cargoProduct.includes('Gases do Ar')) ||
+                        (v.cargoProducts && v.cargoProducts.some(p => p.includes('Gases do Ar')));
+    return isGasesDoAr;
+  });
 
   const vacuumRows = cryogenicVehicles.map(v => {
-    const val = v.vacuumValue !== undefined ? String(v.vacuumValue) : '';
+    const val = v.vacuumValue !== undefined && v.vacuumValue !== '' ? String(v.vacuumValue) : '';
     const classification = getVacuumClassification(val);
+    const statusText = val ? classification.label : 'Sem medição';
     return [
       v.fleetNumber,
       `${v.plate}/${v.uf}`,
       `${v.brand} ${v.model}`,
-      v.cargoProduct || (v.cargoProducts && v.cargoProducts.join(', ')) || 'Gases do Ar (LO2/LN2/LAR)',
+      v.cargoProduct || (v.cargoProducts && v.cargoProducts.join(', ')) || 'Gases do Ar (LO2, LN2, LAR)',
       val ? `${val} ${v.vacuumUnit || 'mtorr'}` : 'Pendente',
       v.vacuumDate ? formatDate(v.vacuumDate) : '—',
-      classification.label || (val ? 'Conforme' : 'Aguardando')
+      statusText
     ];
   });
 
   if (vacuumRows.length === 0) {
-    vacuumRows.push(['—', '—', '—', 'Nenhuma carreta criogênica cadastrada', '—', '—', 'Normal']);
+    vacuumRows.push(['—', '—', '—', 'Nenhuma carreta de Gases do Ar cadastrada', '—', '—', 'Sem medição']);
   }
 
   autoTable(doc, {
     startY: currentY,
     margin: { left: 10, right: 10 },
     theme: 'grid',
-    styles: { fontSize: 8, cellPadding: 2.5 },
-    headStyles: { fillColor: [37, 99, 235], textColor: [255, 255, 255], fontStyle: 'bold' },
-    head: [['Frota', 'Placa/UF', 'Modelo', 'Carga / Produto', 'Nível de Vácuo', 'Data Medição', 'Status Isolamento']],
+    styles: { 
+      fontSize: 7.5, 
+      cellPadding: 2, 
+      overflow: 'linebreak',
+      valign: 'middle'
+    },
+    headStyles: { 
+      fillColor: [30, 41, 59], 
+      textColor: [255, 255, 255], 
+      fontStyle: 'bold',
+      halign: 'left'
+    },
+    head: [['Frota', 'Placa/UF', 'Modelo', 'Carga / Produto', 'Nível de Vácuo', 'Data Medição', 'Status de Isolamento']],
     body: vacuumRows,
+    columnStyles: {
+      0: { cellWidth: 16, halign: 'center', fontStyle: 'bold' }, // Frota
+      1: { cellWidth: 24, halign: 'center' },                   // Placa/UF
+      2: { cellWidth: 32, halign: 'left' },                     // Modelo
+      3: { cellWidth: 38, halign: 'left' },                     // Carga / Produto
+      4: { cellWidth: 20, halign: 'center', fontStyle: 'bold' },// Nível de Vácuo
+      5: { cellWidth: 20, halign: 'center' },                   // Data Medição
+      6: { cellWidth: 40, halign: 'left', overflow: 'linebreak' }, // Status de Isolamento: alinhado à esquerda dentro das linhas da tabela
+    },
+    didParseCell: (data) => {
+      if (data.section === 'body' && data.column.index === 6) {
+        data.cell.styles.halign = 'left';
+        const text = String(data.cell.raw || '');
+        if (text === 'Especificado') {
+          data.cell.styles.textColor = [5, 150, 105];
+          data.cell.styles.fontStyle = 'bold';
+        } else if (text === 'Fora do Especificado') {
+          data.cell.styles.textColor = [217, 119, 6];
+          data.cell.styles.fontStyle = 'bold';
+        } else if (text === 'ATM') {
+          data.cell.styles.textColor = [220, 38, 38];
+          data.cell.styles.fontStyle = 'bold';
+        }
+      }
+    }
   });
 
   // @ts-ignore

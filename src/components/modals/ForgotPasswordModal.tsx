@@ -11,12 +11,13 @@ import {
   ShieldCheck,
   Send,
   RefreshCw,
-  Smartphone
+  ExternalLink
 } from 'lucide-react';
 import { useFleet } from '../../context/FleetContext';
 import { User } from '../../types';
 import { INITIAL_USERS } from '../../data/initialData';
 import { emailService } from '../../services/emailService';
+import { whatsappService } from '../../services/whatsappService';
 import { getSupabaseClient } from '../../services/supabaseClient';
 import { toFrontendUser } from '../../services/supabaseService';
 
@@ -28,7 +29,19 @@ interface ForgotPasswordModalProps {
 }
 
 type Step = 'identify' | 'verify' | 'new_password' | 'success';
-type Channel = 'email' | 'phone';
+type Channel = 'email' | 'whatsapp';
+
+// Official WhatsApp icon component
+const WhatsAppIcon: React.FC<{ className?: string }> = ({ className = 'w-4 h-4' }) => (
+  <svg 
+    className={className} 
+    viewBox="0 0 24 24" 
+    fill="currentColor"
+    aria-hidden="true"
+  >
+    <path d="M12.04 2C6.58 2 2.13 6.45 2.13 11.91C2.13 13.66 2.59 15.36 3.45 16.86L2.05 22L7.3 20.62C8.75 21.41 10.38 21.83 12.04 21.83C17.5 21.83 21.95 17.38 21.95 11.92C21.95 9.27 20.92 6.78 19.05 4.91C17.18 3.03 14.69 2 12.04 2M12.05 3.67C14.25 3.67 16.31 4.53 17.87 6.09C19.42 7.65 20.28 9.72 20.28 11.92C20.28 16.46 16.58 20.15 12.04 20.15C10.56 20.15 9.11 19.76 7.85 19.01L7.55 18.83L4.43 19.65L5.26 16.61L5.06 16.29C4.24 14.99 3.8 13.47 3.8 11.91C3.81 7.37 7.5 3.67 12.05 3.67M9.05 7.42C8.86 7.42 8.54 7.49 8.27 7.78C8.01 8.08 7.27 8.77 7.27 10.18C7.27 11.59 8.3 12.95 8.44 13.14C8.59 13.33 10.43 16.16 13.27 17.38C15.63 18.4 16.11 18.2 16.63 18.15C17.15 18.1 18.3 17.47 18.54 16.79C18.78 16.11 18.78 15.53 18.71 15.41C18.64 15.29 18.44 15.22 18.15 15.08C17.85 14.93 16.42 14.23 16.15 14.13C15.89 14.03 15.7 13.98 15.5 14.28C15.31 14.57 14.77 15.22 14.6 15.41C14.44 15.61 14.27 15.63 13.98 15.49C13.69 15.34 12.75 15.03 11.63 14.04C10.76 13.26 10.17 12.3 10.02 12.05C9.88 11.81 10.01 11.67 10.15 11.53C10.28 11.4 10.45 11.18 10.6 11.01C10.74 10.84 10.79 10.72 10.89 10.52C10.99 10.33 10.94 10.16 10.87 10.01C10.79 9.87 10.21 8.43 9.97 7.84C9.73 7.28 9.49 7.35 9.32 7.35C9.15 7.34 8.95 7.34 8.76 7.34L9.05 7.42Z" />
+  </svg>
+);
 
 export const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({
   isOpen,
@@ -43,10 +56,11 @@ export const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({
   const [channel, setChannel] = useState<Channel>('email');
   const [targetUser, setTargetUser] = useState<User | null>(null);
 
-  // Verification code state
+  // Verification code state (held in memory for validation, NEVER exposed on the screen)
   const [generatedCode, setGeneratedCode] = useState('');
   const [enteredCode, setEnteredCode] = useState('');
   const [countdownCooldown, setCountdownCooldown] = useState(0);
+  const [whatsappUrl, setWhatsappUrl] = useState('');
 
   // New password state
   const [newPassword, setNewPassword] = useState('');
@@ -54,9 +68,7 @@ export const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({
   const [showPassword, setShowPassword] = useState(false);
 
   const [error, setError] = useState('');
-  const [infoMessage, setInfoMessage] = useState('');
   const [isSendingCode, setIsSendingCode] = useState(false);
-  const [deliveryStatusInfo, setDeliveryStatusInfo] = useState<{ simulated: boolean; realSent: boolean }>({ simulated: true, realSent: false });
 
   // Helper function to find a user by email, phone digits, or name
   const findUser = (input: string, userList: User[]): User | undefined => {
@@ -82,17 +94,17 @@ export const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({
     });
   };
 
-  // Only reset state when modal actually opens (never when external state updates)
+  // Only reset state when modal actually opens
   useEffect(() => {
     if (isOpen) {
       setStep('identify');
       setIdentifier(initialIdentifier || '');
       setError('');
-      setInfoMessage('');
       setEnteredCode('');
       setNewPassword('');
       setConfirmPassword('');
       setGeneratedCode('');
+      setWhatsappUrl('');
       setCountdownCooldown(0);
 
       // Check if initial identifier matches any user
@@ -101,7 +113,7 @@ export const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({
         const match = findUser(initialIdentifier, allCandidates);
         if (match) {
           setTargetUser(match);
-          setChannel(initialIdentifier.includes('@') ? 'email' : (match.phone ? 'phone' : 'email'));
+          setChannel(initialIdentifier.includes('@') ? 'email' : (match.phone ? 'whatsapp' : 'email'));
         } else {
           setTargetUser(null);
         }
@@ -123,7 +135,8 @@ export const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({
   if (!isOpen) return null;
 
   // Mask email: d***s@linde.com
-  const maskEmail = (emailStr: string) => {
+  const maskEmail = (emailStr?: string) => {
+    if (!emailStr) return 'E-mail cadastrado';
     const parts = emailStr.split('@');
     if (parts.length !== 2) return emailStr;
     const name = parts[0];
@@ -133,8 +146,8 @@ export const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({
   };
 
   // Mask phone: (11) 9****-4321
-  const maskPhone = (phoneStr: string) => {
-    if (!phoneStr) return 'Celular não cadastrado';
+  const maskPhone = (phoneStr?: string) => {
+    if (!phoneStr) return 'WhatsApp cadastrado';
     const clean = phoneStr.trim();
     if (clean.length < 8) return clean;
     const digits = clean.replace(/\D/g, '');
@@ -163,7 +176,7 @@ export const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({
       if (clean.includes('@')) {
         setChannel('email');
       } else if (clean.replace(/\D/g, '').length >= 8 && match.phone) {
-        setChannel('phone');
+        setChannel('whatsapp');
       }
     } else {
       setTargetUser(null);
@@ -175,7 +188,7 @@ export const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({
     setError('');
     const cleanIdentifier = identifier.trim();
     if (!cleanIdentifier) {
-      setError('Por favor, informe seu e-mail ou celular cadastrado.');
+      setError('Por favor, informe seu e-mail ou WhatsApp/celular cadastrado.');
       return;
     }
 
@@ -201,72 +214,69 @@ export const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({
 
     if (!found) {
       setIsSendingCode(false);
-      setError('Nenhum usuário cadastrado foi encontrado com esse e-mail ou celular. Verifique os dados digitados.');
+      setError('Nenhum usuário cadastrado foi encontrado com esse e-mail ou WhatsApp. Verifique os dados digitados.');
       return;
     }
 
     setTargetUser(found);
 
-    // If phone chosen but user has no phone, switch to email
+    // If whatsapp chosen but user has no phone registered, fallback to email
     let effectiveChannel = channel;
-    if (channel === 'phone' && !found.phone) {
+    if (channel === 'whatsapp' && !found.phone) {
       effectiveChannel = 'email';
       setChannel('email');
     }
 
-    // Generate random 6-digit code
+    // Generate secure 6-digit random code (never shown on screen)
     const code = Math.floor(100000 + Math.random() * 900000).toString();
     setGeneratedCode(code);
     setCountdownCooldown(30);
     setEnteredCode('');
 
-    if (effectiveChannel === 'email') {
-      try {
-        const sendResult = await emailService.sendRecoveryCode(found.email, code, found.name);
-        if (sendResult.success && !sendResult.simulated) {
-          setDeliveryStatusInfo({ simulated: false, realSent: true });
-          setInfoMessage(`E-mail com código enviado com sucesso para ${found.email}!`);
-        } else {
-          setDeliveryStatusInfo({ simulated: true, realSent: false });
-          setInfoMessage(`Código gerado com sucesso para ${found.email}.`);
+    try {
+      if (effectiveChannel === 'email') {
+        await emailService.sendRecoveryCode(found.email, code, found.name);
+      } else {
+        const waResult = await whatsappService.sendRecoveryCode(
+          found.phone || cleanIdentifier, 
+          code, 
+          found.name
+        );
+        if (waResult.whatsappUrl) {
+          setWhatsappUrl(waResult.whatsappUrl);
         }
-      } catch {
-        setDeliveryStatusInfo({ simulated: true, realSent: false });
-      } finally {
-        setIsSendingCode(false);
       }
-    } else {
+      setStep('verify');
+    } catch (err: any) {
+      setError(err?.message || 'Falha ao despachar o código. Tente novamente.');
+    } finally {
       setIsSendingCode(false);
-      setDeliveryStatusInfo({ simulated: true, realSent: false });
-      setInfoMessage(`Código de verificação enviado para o celular ${found.phone}!`);
     }
-
-    setStep('verify');
   };
 
   const handleReenviarCodigo = async () => {
-    if (countdownCooldown > 0) return;
+    if (countdownCooldown > 0 || !targetUser) return;
     const code = Math.floor(100000 + Math.random() * 900000).toString();
     setGeneratedCode(code);
     setCountdownCooldown(30);
     setError('');
 
-    if (channel === 'email' && targetUser) {
-      setIsSendingCode(true);
-      try {
-        const result = await emailService.sendRecoveryCode(targetUser.email, code, targetUser.name);
-        if (result.success && !result.simulated) {
-          setDeliveryStatusInfo({ simulated: false, realSent: true });
-          setInfoMessage(`Novo código enviado para ${targetUser.email}!`);
-        } else {
-          setDeliveryStatusInfo({ simulated: true, realSent: false });
-          setInfoMessage(`Novo código gerado para ${targetUser.email}!`);
+    setIsSendingCode(true);
+    try {
+      if (channel === 'email') {
+        await emailService.sendRecoveryCode(targetUser.email, code, targetUser.name);
+      } else {
+        const waResult = await whatsappService.sendRecoveryCode(
+          targetUser.phone || identifier, 
+          code, 
+          targetUser.name
+        );
+        if (waResult.whatsappUrl) {
+          setWhatsappUrl(waResult.whatsappUrl);
         }
-      } finally {
-        setIsSendingCode(false);
       }
-    } else {
-      setInfoMessage(`Novo código gerado para ${channel === 'email' ? targetUser?.email : targetUser?.phone}!`);
+    } finally {
+      setIsSendingCode(false);
     }
   };
 
@@ -274,18 +284,17 @@ export const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({
     e.preventDefault();
     setError('');
     if (!enteredCode.trim()) {
-      setError('Por favor, digite o código de 6 dígitos.');
+      setError('Por favor, digite o código de 6 dígitos recebido.');
       return;
     }
 
     if (enteredCode.trim() !== generatedCode.trim()) {
-      setError('Código incorreto. Verifique os dígitos informados e tente novamente.');
+      setError('Código incorreto. Verifique a mensagem recebida no WhatsApp ou no E-mail e digite novamente.');
       return;
     }
 
     setStep('new_password');
     setError('');
-    setInfoMessage('');
   };
 
   const handleSaveNewPassword = (e: React.FormEvent) => {
@@ -359,12 +368,12 @@ export const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({
           {step === 'identify' && (
             <form onSubmit={handleSendCode} className="space-y-4">
               <p className="text-xs text-slate-600 leading-relaxed">
-                Informe o seu <strong>e-mail corporativo</strong> ou o <strong>celular cadastrado</strong> para receber o código de segurança.
+                Informe o seu <strong>e-mail</strong> ou <strong>WhatsApp cadastrado</strong> para receber o código seguro de recuperação.
               </p>
 
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wider">
-                  E-mail ou Celular
+                  E-mail ou WhatsApp
                 </label>
                 <div className="relative">
                   <input
@@ -379,13 +388,36 @@ export const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({
                 </div>
               </div>
 
-              {/* Canal de envio selecionável */}
+              {/* Canal de envio selecionável: WhatsApp ou E-mail */}
               <div className="space-y-2 pt-1">
                 <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
-                  Onde deseja receber o código?
+                  Como deseja receber o código?
                 </label>
 
                 <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setChannel('whatsapp');
+                      setError('');
+                    }}
+                    className={`p-3 rounded-xl border text-left flex flex-col gap-1 transition cursor-pointer ${
+                      channel === 'whatsapp'
+                        ? 'border-emerald-500 bg-emerald-50/60 ring-2 ring-emerald-500/20 shadow-xs'
+                        : 'border-slate-200 bg-white hover:bg-slate-50'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <div className={`w-5 h-5 rounded-full flex items-center justify-center ${channel === 'whatsapp' ? 'bg-[#25D366] text-white' : 'bg-slate-100 text-slate-500'}`}>
+                        <WhatsAppIcon className="w-3.5 h-3.5" />
+                      </div>
+                      <span className="text-xs font-bold text-slate-900">Por WhatsApp</span>
+                    </div>
+                    <span className="text-[10px] text-slate-500 truncate">
+                      {targetUser?.phone ? maskPhone(targetUser.phone) : 'WhatsApp cadastrado'}
+                    </span>
+                  </button>
+
                   <button
                     type="button"
                     onClick={() => {
@@ -399,32 +431,13 @@ export const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({
                     }`}
                   >
                     <div className="flex items-center gap-2">
-                      <Mail className={`w-4 h-4 ${channel === 'email' ? 'text-[#ff5500]' : 'text-slate-500'}`} />
+                      <div className={`w-5 h-5 rounded-full flex items-center justify-center ${channel === 'email' ? 'bg-[#ff5500] text-white' : 'bg-slate-100 text-slate-500'}`}>
+                        <Mail className="w-3.5 h-3.5" />
+                      </div>
                       <span className="text-xs font-bold text-slate-900">Por E-mail</span>
                     </div>
                     <span className="text-[10px] text-slate-500 truncate">
                       {targetUser?.email ? maskEmail(targetUser.email) : 'E-mail cadastrado'}
-                    </span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setChannel('phone');
-                      setError('');
-                    }}
-                    className={`p-3 rounded-xl border text-left flex flex-col gap-1 transition cursor-pointer ${
-                      channel === 'phone'
-                        ? 'border-[#ff5500] bg-orange-50/50 ring-2 ring-orange-500/20 shadow-xs'
-                        : 'border-slate-200 bg-white hover:bg-slate-50'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2">
-                      <Smartphone className={`w-4 h-4 ${channel === 'phone' ? 'text-[#ff5500]' : 'text-slate-500'}`} />
-                      <span className="text-xs font-bold text-slate-900">Por Celular</span>
-                    </div>
-                    <span className="text-[10px] text-slate-500 truncate">
-                      {targetUser?.phone ? maskPhone(targetUser.phone) : 'SMS Celular'}
                     </span>
                   </button>
                 </div>
@@ -457,54 +470,62 @@ export const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({
             </form>
           )}
 
-          {/* STEP 2: ENTER CODE */}
+          {/* STEP 2: ENTER CODE (CODE IS NEVER SHOWN ON SCREEN) */}
           {step === 'verify' && (
             <form onSubmit={handleValidateCode} className="space-y-4">
-              {channel === 'email' && deliveryStatusInfo.realSent ? (
-                <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-900 space-y-1">
-                  <div className="flex items-center gap-1.5 font-bold">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                    <span>E-mail com código enviado!</span>
+              {channel === 'whatsapp' ? (
+                <div className="p-3.5 bg-emerald-50 border border-emerald-200 rounded-2xl text-xs text-emerald-950 space-y-2.5 animate-in fade-in duration-200">
+                  <div className="flex items-center gap-2 font-bold text-emerald-900">
+                    <div className="w-6 h-6 rounded-full bg-[#25D366] text-white flex items-center justify-center shrink-0 shadow-xs">
+                      <WhatsAppIcon className="w-3.5 h-3.5" />
+                    </div>
+                    <span className="text-sm">Código enviado para o WhatsApp!</span>
                   </div>
-                  <p className="text-[11px] text-emerald-800 leading-relaxed">
-                    O código foi despachado para: <strong>{targetUser?.email}</strong>. Verifique sua caixa de entrada ou spam.
+                  
+                  <p className="text-xs text-emerald-800 leading-relaxed">
+                    O código de segurança foi enviado para o WhatsApp <strong>{maskPhone(targetUser?.phone || identifier)}</strong>.
+                  </p>
+
+                  {whatsappUrl && (
+                    <div className="pt-1">
+                      <a
+                        href={whatsappUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center justify-center gap-2 w-full py-2.5 px-3 bg-[#25D366] hover:bg-[#20bd5a] text-white text-xs font-bold rounded-xl shadow-xs transition active:scale-98"
+                      >
+                        <WhatsAppIcon className="w-4 h-4" />
+                        <span>Abrir mensagem no WhatsApp</span>
+                        <ExternalLink className="w-3.5 h-3.5 ml-auto opacity-70" />
+                      </a>
+                    </div>
+                  )}
+                  
+                  <p className="text-[11px] text-emerald-700 italic">
+                    Consulte a mensagem recebida e insira os 6 dígitos abaixo para prosseguir.
                   </p>
                 </div>
               ) : (
-                <div className="p-3 bg-blue-50 border border-blue-200 rounded-xl text-xs text-blue-900 space-y-1">
-                  <div className="flex items-center gap-1.5 font-bold">
-                    {channel === 'email' ? <Mail className="w-4 h-4 text-blue-600" /> : <Smartphone className="w-4 h-4 text-blue-600" />}
-                    <span>Código gerado para envio!</span>
+                <div className="p-3.5 bg-blue-50 border border-blue-200 rounded-2xl text-xs text-blue-950 space-y-2 animate-in fade-in duration-200">
+                  <div className="flex items-center gap-2 font-bold text-blue-900">
+                    <div className="w-6 h-6 rounded-full bg-blue-600 text-white flex items-center justify-center shrink-0 shadow-xs">
+                      <Mail className="w-3.5 h-3.5" />
+                    </div>
+                    <span className="text-sm">Código enviado para o seu E-mail!</span>
                   </div>
-                  <p className="text-[11px] text-blue-800 leading-relaxed">
-                    Destino: <strong>{channel === 'email' ? targetUser?.email : (targetUser?.phone || identifier)}</strong>.
+                  <p className="text-xs text-blue-800 leading-relaxed">
+                    O código de segurança foi enviado para <strong>{maskEmail(targetUser?.email || identifier)}</strong>.
+                  </p>
+                  <p className="text-[11px] text-blue-700 italic">
+                    Verifique sua caixa de entrada ou spam e insira os 6 dígitos abaixo.
                   </p>
                 </div>
               )}
 
-              {/* Simulation Banner with Quick Fill Button */}
-              {generatedCode && (
-                <div className="p-3 bg-amber-50 border border-amber-200/90 rounded-xl flex items-center justify-between gap-2">
-                  <div className="text-[11px] text-amber-900">
-                    <span className="block font-bold">Código de verificação ({channel === 'email' ? 'E-mail' : 'SMS'}):</span>
-                    <span className="font-mono text-sm font-black text-amber-800 tracking-wider">Código: {generatedCode}</span>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setEnteredCode(generatedCode);
-                      setError('');
-                    }}
-                    className="px-3 py-1.5 text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white rounded-lg transition shrink-0 cursor-pointer shadow-xs active:scale-95"
-                  >
-                    Preencher código
-                  </button>
-                </div>
-              )}
-
+              {/* Input for the user to type the received 6 digits */}
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wider text-center">
-                  Digite o código de 6 dígitos
+                  Digite o código de 6 dígitos recebido
                 </label>
                 <input
                   type="text"
@@ -528,7 +549,7 @@ export const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({
                   className="text-slate-500 hover:text-slate-800 flex items-center gap-1 font-semibold cursor-pointer"
                 >
                   <ArrowLeft className="w-3.5 h-3.5" />
-                  <span>Trocar e-mail ou celular</span>
+                  <span>Trocar e-mail ou WhatsApp</span>
                 </button>
 
                 <button
@@ -579,7 +600,7 @@ export const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({
                   <button
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer p-1"
                   >
                     {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                   </button>

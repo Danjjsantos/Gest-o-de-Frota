@@ -12,7 +12,8 @@ import {
   Truck, 
   Calendar, 
   Camera,
-  ShieldCheck
+  ShieldCheck,
+  Trash2
 } from 'lucide-react';
 import { ServiceOrder, OSCategory, OSStatus } from '../types';
 import { PriorityBadge } from './PriorityBadge';
@@ -20,12 +21,14 @@ import { PriorityBadge } from './PriorityBadge';
 interface ServiceOrderCardProps {
   os: ServiceOrder;
   onClick: (os: ServiceOrder) => void;
+  onDelete?: (os: ServiceOrder) => void;
   compact?: boolean;
 }
 
 export const ServiceOrderCard: React.FC<ServiceOrderCardProps> = ({
   os,
   onClick,
+  onDelete,
   compact = false,
 }) => {
   const getCategoryIcon = (cat: OSCategory) => {
@@ -122,8 +125,22 @@ export const ServiceOrderCard: React.FC<ServiceOrderCardProps> = ({
           </div>
         </div>
 
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex items-center gap-1.5 shrink-0">
           {getStatusBadge(os.status)}
+          {onDelete && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onDelete(os);
+              }}
+              className="p-1 rounded-lg text-slate-300 hover:text-rose-600 hover:bg-rose-50 transition cursor-pointer"
+              title={`Excluir OS #${os.code}`}
+              aria-label="Excluir OS"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
+          )}
           <ChevronRight className="w-3.5 h-3.5 text-slate-300" />
         </div>
       </div>
@@ -225,6 +242,20 @@ export const ServiceOrderCard: React.FC<ServiceOrderCardProps> = ({
       <div className="flex items-center justify-between md:justify-end gap-3 shrink-0 pt-3 md:pt-0 border-t md:border-t-0 border-slate-100">
         <div className="flex items-center gap-2">
           {getStatusBadge(os.status)}
+          {onDelete && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onDelete(os);
+              }}
+              className="p-1.5 rounded-lg text-slate-300 hover:text-rose-600 hover:bg-rose-50 transition cursor-pointer"
+              title={`Excluir OS #${os.code}`}
+              aria-label="Excluir Ordem de Serviço"
+            >
+              <Trash2 className="w-4 h-4" />
+            </button>
+          )}
         </div>
         <div className="w-8 h-8 rounded-lg bg-slate-50 group-hover:bg-[#ff5500] group-hover:text-white text-slate-400 flex items-center justify-center transition">
           <ChevronRight className="w-4 h-4" />

@@ -14,12 +14,14 @@ import {
   UserCheck,
   Calendar,
   Users,
-  ShieldCheck
+  ShieldCheck,
+  Trash2
 } from 'lucide-react';
 import { useFleet } from '../context/FleetContext';
 import { ServiceOrder, OSCategory, OSStatus } from '../types';
 import { ServiceOrderCard } from '../components/ServiceOrderCard';
 import { PriorityBadge } from '../components/PriorityBadge';
+import { ConfirmDeleteModal } from '../components/modals/ConfirmDeleteModal';
 
 interface ServiceOrdersViewProps {
   onOpenNewOS: () => void;
@@ -35,7 +37,8 @@ export const ServiceOrdersView: React.FC<ServiceOrdersViewProps> = ({
   onSelectOS,
   initialCategory,
 }) => {
-  const { serviceOrders, currentUser } = useFleet();
+  const { serviceOrders, currentUser, deleteServiceOrder } = useFleet();
+  const isAdmin = currentUser?.role === 'Administrador';
 
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<'Todos status' | OSStatus>('Todos status');
@@ -43,6 +46,7 @@ export const ServiceOrdersView: React.FC<ServiceOrdersViewProps> = ({
   const [priorityFilter, setPriorityFilter] = useState<PriorityFilter>('Todas prioridades');
   const [directedToMeOnly, setDirectedToMeOnly] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>('cards');
+  const [osToDelete, setOsToDelete] = useState<ServiceOrder | null>(null);
 
   // Summary counts for technicians to prioritize work
   const priorityCounts = useMemo(() => {
@@ -520,13 +524,29 @@ export const ServiceOrdersView: React.FC<ServiceOrdersViewProps> = ({
 
                       {/* Ações */}
                       <td className="py-3.5 px-4 text-right whitespace-nowrap">
-                        <button
-                          onClick={() => onSelectOS(os)}
-                          className="flex items-center gap-1 ml-auto px-2 py-1 rounded-lg text-xs font-semibold bg-slate-100 hover:bg-[#ff5500] hover:text-white transition"
-                        >
-                          <Eye className="w-3.5 h-3.5" />
-                          <span>Ver</span>
-                        </button>
+                        <div className="flex items-center justify-end gap-1.5 ml-auto">
+                          <button
+                            onClick={() => onSelectOS(os)}
+                            className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold bg-slate-100 hover:bg-[#ff5500] hover:text-white transition cursor-pointer"
+                          >
+                            <Eye className="w-3.5 h-3.5" />
+                            <span>Ver</span>
+                          </button>
+                          {isAdmin && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setOsToDelete(os);
+                              }}
+                              className="p-1 rounded-lg text-slate-300 hover:text-rose-600 hover:bg-rose-50 transition cursor-pointer"
+                              title={`Excluir OS #${os.code}`}
+                              aria-label="Excluir OS"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   );
@@ -551,6 +571,7 @@ export const ServiceOrdersView: React.FC<ServiceOrdersViewProps> = ({
               key={os.id}
               os={os}
               onClick={onSelectOS}
+              onDelete={isAdmin ? (targetOs) => setOsToDelete(targetOs) : undefined}
             />
           ))}
 
@@ -561,6 +582,25 @@ export const ServiceOrdersView: React.FC<ServiceOrdersViewProps> = ({
           )}
         </div>
       )}
+
+      {/* Modal: Excluir Ordem de Serviço (Administrador) */}
+      <ConfirmDeleteModal
+        isOpen={!!osToDelete}
+        onClose={() => setOsToDelete(null)}
+        onConfirm={() => {
+          if (osToDelete) {
+            deleteServiceOrder(osToDelete.id);
+            setOsToDelete(null);
+          }
+        }}
+        title="Excluir Ordem de Serviço"
+        itemCategory="Manutenção / OS"
+        itemName={osToDelete ? `OS #${osToDelete.code} - ${osToDelete.title}` : ''}
+        description={`Tem certeza que deseja excluir permanentemente a Ordem de Serviço #${osToDelete?.code}? Todos os registros, fotos e notas de resolução serão removidos.`}
+        warningNote="Esta ação é irreversível e excluirá a OS da base de dados."
+        confirmButtonText="Excluir OS"
+      />
+
     </div>
   );
 };

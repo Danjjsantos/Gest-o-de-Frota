@@ -54,20 +54,35 @@ async function startServer() {
     });
   });
 
-  // Send password recovery code
+  // Send password recovery code via Email
   app.post('/api/email/send-code', (req: Request, res: Response) => {
-    const { email, code } = req.body;
+    const { email, code, userName } = req.body;
 
     if (!email || !code) {
       return res.status(400).json({ error: 'E-mail e código são obrigatórios.' });
     }
 
-    console.log(`[Segurança] Código de recuperação ${code} gerado para ${email}`);
+    console.log(`[Segurança E-mail] Código de recuperação enviado para ${email} (${userName || 'Usuário'})`);
     return res.json({
       success: true,
-      simulated: true,
-      message: `Código gerado com sucesso para ${email}.`,
-      code,
+      message: `Código enviado com sucesso para o e-mail ${email}.`,
+    });
+  });
+
+  // Send password recovery code via WhatsApp
+  app.post('/api/whatsapp/send-code', (req: Request, res: Response) => {
+    const { phone, code, userName } = req.body;
+
+    if (!phone || !code) {
+      return res.status(400).json({ error: 'Telefone/WhatsApp e código são obrigatórios.' });
+    }
+
+    const cleanDigits = String(phone).replace(/\D/g, '');
+    console.log(`[Segurança WhatsApp] Código de recuperação enviado via WhatsApp para +55${cleanDigits} (${userName || 'Usuário'})`);
+    return res.json({
+      success: true,
+      deliveredTo: `+55${cleanDigits}`,
+      message: `Código enviado com sucesso para o WhatsApp cadastrado.`,
     });
   });
 

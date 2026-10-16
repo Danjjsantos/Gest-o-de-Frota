@@ -23,10 +23,11 @@ import {
   Sparkles,
   Gauge
 } from 'lucide-react';
-import { Vehicle, DocumentType, VehicleAttachment } from '../../types';
+import { Vehicle, DocumentType, VehicleAttachment, ServiceOrder } from '../../types';
 import { useFleet, formatDisplayDate } from '../../context/FleetContext';
 import { PriorityBadge } from '../PriorityBadge';
 import { generateVehicleDossierPDF } from '../../utils/pdfGenerator';
+import { ConfirmDeleteModal } from './ConfirmDeleteModal';
 
 interface VehicleDetailModalProps {
   vehicle: Vehicle | null;
@@ -45,11 +46,14 @@ export const VehicleDetailModal: React.FC<VehicleDetailModalProps> = ({
 }) => {
   const { 
     currentUser, 
+    deleteVehicle,
+    deleteVehicleDocument,
     updateVehicleDocument, 
     updateVehicleDocumentWithFile,
     addVehicleAttachment,
     removeVehicleAttachment,
     serviceOrders, 
+    deleteServiceOrder,
     users,
     settings
   } = useFleet();
@@ -58,6 +62,12 @@ export const VehicleDetailModal: React.FC<VehicleDetailModalProps> = ({
   const [editingDoc, setEditingDoc] = useState<DocumentType | null>(null);
   const [newDate, setNewDate] = useState('');
   const [pdfSuccess, setPdfSuccess] = useState(false);
+
+  // Deletion state for Administrator
+  const [deleteFleetModalOpen, setDeleteFleetModalOpen] = useState(false);
+  const [docToDelete, setDocToDelete] = useState<{ docType: DocumentType; name: string } | null>(null);
+  const [attachmentToDelete, setAttachmentToDelete] = useState<VehicleAttachment | null>(null);
+  const [osToDelete, setOsToDelete] = useState<ServiceOrder | null>(null);
 
   // Upload Form State (for Administrator)
   const [showUploadForm, setShowUploadForm] = useState(false);
@@ -395,6 +405,18 @@ export const VehicleDetailModal: React.FC<VehicleDetailModalProps> = ({
             </div>
 
             <div className="flex items-center gap-2">
+              {isAdmin && (
+                <button
+                  type="button"
+                  onClick={() => setDeleteFleetModalOpen(true)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold text-rose-600 bg-rose-50 hover:bg-rose-100 border border-rose-200 transition cursor-pointer"
+                  title="Excluir cadastro desta frota permanentemente"
+                >
+                  <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+                  <span className="hidden sm:inline">Excluir Frota</span>
+                </button>
+              )}
+
               <button
                 onClick={handleExportPDF}
                 className={`hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition border ${
@@ -922,15 +944,27 @@ export const VehicleDetailModal: React.FC<VehicleDetailModalProps> = ({
                                 )}
 
                                 {isApplicable && isAdmin && (
-                                  <button
-                                    onClick={() => {
-                                      setEditingDoc(dtype);
-                                      setNewDate(vehicle.documents[dtype]?.expiryDate || '');
-                                    }}
-                                    className="text-[11px] font-bold text-[#ff5500] hover:underline ml-1 cursor-pointer"
-                                  >
-                                    Editar data
-                                  </button>
+                                  <div className="flex items-center gap-1.5 ml-1">
+                                    <button
+                                      onClick={() => {
+                                        setEditingDoc(dtype);
+                                        setNewDate(vehicle.documents[dtype]?.expiryDate || '');
+                                      }}
+                                      className="text-[11px] font-bold text-[#ff5500] hover:underline cursor-pointer"
+                                    >
+                                      Editar data
+                                    </button>
+                                    {doc && (doc.expiryDate || doc.fileUrl) && (
+                                      <button
+                                        type="button"
+                                        onClick={() => setDocToDelete({ docType: dtype, name: dtype })}
+                                        className="p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded transition cursor-pointer"
+                                        title={`Excluir registro do documento ${dtype}`}
+                                      >
+                                        <Trash2 className="w-3.5 h-3.5" />
+                                      </button>
+                                    )}
+                                  </div>
                                 )}
                               </>
                             )}
@@ -1065,7 +1099,7 @@ export const VehicleDetailModal: React.FC<VehicleDetailModalProps> = ({
 
                                 {isAdmin && (
                                   <button
-                                    onClick={() => handleDeleteAttachment(att.id)}
+                                    onClick={() => setAttachmentToDelete(att)}
                                     className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition cursor-pointer"
                                     title="Excluir anexo"
                                   >
@@ -1153,6 +1187,16 @@ export const VehicleDetailModal: React.FC<VehicleDetailModalProps> = ({
                           }`}>
                             {os.status}
                           </span>
+                          {isAdmin && (
+                            <button
+                              type="button"
+                              onClick={() => setOsToDelete(os)}
+                              className="p-1.5 rounded-lg text-slate-300 hover:text-rose-600 hover:bg-rose-50 transition cursor-pointer"
+                              title={`Excluir OS #${os.code}`}
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
                         </div>
                       </div>
                     ))}
@@ -1260,6 +1304,77 @@ export const VehicleDetailModal: React.FC<VehicleDetailModalProps> = ({
           </div>
         </div>
       )}
+
+      {/* Modal: Excluir Frota (Administrador) */}
+      <ConfirmDeleteModal
+        isOpen={deleteFleetModalOpen}
+        onClose={() => setDeleteFleetModalOpen(false)}
+        onConfirm={() => {
+          deleteVehicle(vehicle.id);
+          setDeleteFleetModalOpen(false);
+          onClose();
+        }}
+        title="Excluir Cadastro da Frota"
+        itemCategory="Veículo / Frota"
+        itemName={`Frota ${vehicle.fleetNumber} (${vehicle.plate}/${vehicle.uf})`}
+        description={`Tem certeza que deseja excluir permanentemente o cadastro da Frota ${vehicle.fleetNumber}? Todos os documentos, históricos, fotos e informações vinculadas a este veículo serão removidos.`}
+        warningNote="Esta ação é definitiva e removerá o veículo da base de dados."
+        confirmButtonText="Sim, Excluir Frota"
+      />
+
+      {/* Modal: Excluir Documento Obrigatório (Administrador) */}
+      <ConfirmDeleteModal
+        isOpen={!!docToDelete}
+        onClose={() => setDocToDelete(null)}
+        onConfirm={() => {
+          if (docToDelete) {
+            deleteVehicleDocument(vehicle.id, docToDelete.docType);
+            setDocToDelete(null);
+          }
+        }}
+        title="Excluir Documento da Frota"
+        itemCategory="Documentação Veicular"
+        itemName={docToDelete ? `${docToDelete.name} - Frota ${vehicle.fleetNumber}` : ''}
+        description={`Tem certeza que deseja remover o cadastro do documento ${docToDelete?.name} da Frota ${vehicle.fleetNumber}? Os dados de vencimento e arquivo associados serão excluídos.`}
+        warningNote="O documento voltará a constar como não cadastrado/pendente."
+        confirmButtonText="Excluir Documento"
+      />
+
+      {/* Modal: Excluir Anexo / Arquivo Digitalizado (Administrador) */}
+      <ConfirmDeleteModal
+        isOpen={!!attachmentToDelete}
+        onClose={() => setAttachmentToDelete(null)}
+        onConfirm={() => {
+          if (attachmentToDelete) {
+            removeVehicleAttachment(vehicle.id, attachmentToDelete.id);
+            setAttachmentToDelete(null);
+          }
+        }}
+        title="Excluir Arquivo Anexado"
+        itemCategory="Arquivo / Anexo"
+        itemName={attachmentToDelete?.name}
+        description={`Deseja excluir permanentemente o arquivo "${attachmentToDelete?.name}" da Frota ${vehicle.fleetNumber}?`}
+        warningNote="O arquivo digitalizado será apagado do armazenamento da frota."
+        confirmButtonText="Excluir Arquivo"
+      />
+
+      {/* Modal: Excluir Ordem de Serviço (Administrador) */}
+      <ConfirmDeleteModal
+        isOpen={!!osToDelete}
+        onClose={() => setOsToDelete(null)}
+        onConfirm={() => {
+          if (osToDelete) {
+            deleteServiceOrder(osToDelete.id);
+            setOsToDelete(null);
+          }
+        }}
+        title="Excluir Ordem de Serviço"
+        itemCategory="Manutenção / OS"
+        itemName={osToDelete ? `OS #${osToDelete.code} - ${osToDelete.title}` : ''}
+        description={`Tem certeza que deseja excluir permanentemente a Ordem de Serviço #${osToDelete?.code}? Todos os registros, fotos e notas de resolução serão removidos.`}
+        warningNote="Esta ação é irreversível e excluirá a OS do histórico desta frota."
+        confirmButtonText="Excluir OS"
+      />
     </>
   );
 };

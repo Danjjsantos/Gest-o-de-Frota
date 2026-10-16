@@ -8,13 +8,15 @@ import {
   Download, 
   FileText,
   FileCheck,
-  Gauge
+  Gauge,
+  Trash2
 } from 'lucide-react';
 import { useFleet, formatDisplayDate } from '../context/FleetContext';
 import { Vehicle, VehicleType, DocumentType, ServiceOrder } from '../types';
 import { generateFullFleetReportPDF } from '../utils/pdfGenerator';
 import { VehicleDetailPage } from './VehicleDetailPage';
 import { ServiceOrderDetailModal } from '../components/modals/ServiceOrderDetailModal';
+import { ConfirmDeleteModal } from '../components/modals/ConfirmDeleteModal';
 
 interface FleetViewProps {
   onOpenNewVehicleModal: () => void;
@@ -27,10 +29,12 @@ export const FleetView: React.FC<FleetViewProps> = ({
   onOpenNewOSForVehicle,
   onSelectVehicle,
 }) => {
-  const { vehicles, serviceOrders, currentUser } = useFleet();
+  const { vehicles, serviceOrders, currentUser, deleteVehicle } = useFleet();
+  const isAdmin = currentUser?.role === 'Administrador';
   const isFullAccessUser = currentUser?.role === 'Administrador' || currentUser?.role === 'Gerente';
   const [selectedVehicleId, setSelectedVehicleId] = useState<string | null>(null);
   const [selectedOS, setSelectedOS] = useState<ServiceOrder | null>(null);
+  const [vehicleToDelete, setVehicleToDelete] = useState<Vehicle | null>(null);
   const [search, setSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState<'Todos' | VehicleType>('Todos');
   const [exportSuccess, setExportSuccess] = useState(false);
@@ -482,8 +486,24 @@ export const FleetView: React.FC<FleetViewProps> = ({
                   </div>
                 </div>
 
-                {/* Right section: Chevron arrow indicating clickable */}
-                <ChevronRight className="w-5 h-5 text-slate-300 group-hover:text-[#ff5500] group-hover:translate-x-1 transition-all shrink-0 ml-3" />
+                {/* Right section: Admin delete button + Chevron arrow indicating clickable */}
+                <div className="flex items-center gap-1 shrink-0 ml-3">
+                  {isAdmin && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setVehicleToDelete(vehicle);
+                      }}
+                      className="p-2 rounded-xl text-slate-300 hover:text-rose-600 hover:bg-rose-50 transition cursor-pointer"
+                      title={`Excluir cadastro da Frota ${vehicle.fleetNumber}`}
+                      aria-label="Excluir Frota"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  )}
+                  <ChevronRight className="w-5 h-5 text-slate-300 group-hover:text-[#ff5500] group-hover:translate-x-1 transition-all" />
+                </div>
               </div>
             );
           })
@@ -501,6 +521,24 @@ export const FleetView: React.FC<FleetViewProps> = ({
         isOpen={!!selectedOS}
         onClose={() => setSelectedOS(null)}
         os={selectedOS}
+      />
+
+      {/* Modal de Confirmação de Exclusão de Frota (Administrador) */}
+      <ConfirmDeleteModal
+        isOpen={!!vehicleToDelete}
+        onClose={() => setVehicleToDelete(null)}
+        onConfirm={() => {
+          if (vehicleToDelete) {
+            deleteVehicle(vehicleToDelete.id);
+            setVehicleToDelete(null);
+          }
+        }}
+        title="Excluir Cadastro da Frota"
+        itemCategory="Veículo / Frota"
+        itemName={vehicleToDelete ? `Frota ${vehicleToDelete.fleetNumber} (${vehicleToDelete.plate}/${vehicleToDelete.uf})` : ''}
+        description={`Tem certeza que deseja excluir permanentemente o cadastro do veículo Frota ${vehicleToDelete?.fleetNumber}? Todos os registros, especificações e documentos desta frota serão removidos.`}
+        warningNote="Esta ação é irreversível e excluirá o veículo e seus vínculos do sistema."
+        confirmButtonText="Excluir Frota"
       />
 
     </div>

@@ -37,6 +37,7 @@ import { useFleet, getDaysDifference, formatDisplayDate } from '../context/Fleet
 import { PriorityBadge } from '../components/PriorityBadge';
 import { generateVehicleDossierPDF } from '../utils/pdfGenerator';
 import { ServiceOrderDetailModal } from '../components/modals/ServiceOrderDetailModal';
+import { ConfirmDeleteModal } from '../components/modals/ConfirmDeleteModal';
 
 interface VehicleDetailPageProps {
   vehicle: Vehicle;
@@ -54,6 +55,8 @@ export const VehicleDetailPage: React.FC<VehicleDetailPageProps> = ({
   const { 
     currentUser, 
     updateVehicle,
+    deleteVehicle,
+    deleteVehicleDocument,
     updateVehicleDocument, 
     updateVehicleDocumentWithFile,
     addVehicleAttachment,
@@ -62,15 +65,24 @@ export const VehicleDetailPage: React.FC<VehicleDetailPageProps> = ({
     updateVehicleEquipment,
     deleteVehicleEquipment,
     serviceOrders, 
+    deleteServiceOrder,
     users,
     settings 
   } = useFleet();
+
+  const isAdministrator = currentUser?.role === 'Administrador';
 
   const [activeTab, setActiveTab] = useState<TabType>('geral');
   const [editingDoc, setEditingDoc] = useState<DocumentType | null>(null);
   const [newDate, setNewDate] = useState('');
   const [pdfSuccess, setPdfSuccess] = useState(false);
   const [selectedOS, setSelectedOS] = useState<ServiceOrder | null>(null);
+
+  // Delete Modals State (for Administrator)
+  const [deleteFleetModalOpen, setDeleteFleetModalOpen] = useState(false);
+  const [docToDelete, setDocToDelete] = useState<{ docType: DocumentType; name: string } | null>(null);
+  const [attachmentToDelete, setAttachmentToDelete] = useState<VehicleAttachment | null>(null);
+  const [osToDelete, setOsToDelete] = useState<ServiceOrder | null>(null);
 
   // General Info Edit Modal State (for Administrator)
   const [showEditGeneralModal, setShowEditGeneralModal] = useState(false);
@@ -571,6 +583,18 @@ export const VehicleDetailPage: React.FC<VehicleDetailPageProps> = ({
               >
                 <Download className={`w-3.5 h-3.5 ${pdfSuccess ? 'text-white' : 'text-[#ff5500]'}`} />
                 <span>{pdfSuccess ? 'Relatório Baixado!' : 'Exportar Relatório'}</span>
+              </button>
+            )}
+
+            {isAdministrator && (
+              <button
+                type="button"
+                onClick={() => setDeleteFleetModalOpen(true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold text-rose-600 bg-rose-50 hover:bg-rose-100 border border-rose-200 transition cursor-pointer"
+                title="Excluir cadastro desta frota permanentemente"
+              >
+                <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+                <span className="hidden sm:inline">Excluir Frota</span>
               </button>
             )}
 
@@ -1562,6 +1586,16 @@ export const VehicleDetailPage: React.FC<VehicleDetailPageProps> = ({
                         <span className="text-xs font-bold text-slate-700 bg-white px-2.5 py-1 rounded-lg border border-slate-200">
                           {doc?.status === 'valid' ? 'Válido' : doc?.status === 'expiring' ? 'A Vencer' : 'Pendente'}
                         </span>
+                        {isAdministrator && doc && (doc.expiryDate || doc.fileUrl) && (
+                          <button
+                            type="button"
+                            onClick={() => setDocToDelete({ docType: dtype, name: dtype })}
+                            className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition cursor-pointer"
+                            title={`Excluir registro do documento ${dtype}`}
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        )}
                       </div>
                     </div>
                   );
@@ -1601,6 +1635,16 @@ export const VehicleDetailPage: React.FC<VehicleDetailPageProps> = ({
                         <a href={att.dataUrl} download={att.name} className="p-1.5 text-slate-600 hover:bg-slate-200 rounded-lg">
                           <Download className="w-4 h-4" />
                         </a>
+                        {isAdministrator && (
+                          <button
+                            type="button"
+                            onClick={() => setAttachmentToDelete(att)}
+                            className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition cursor-pointer"
+                            title="Excluir arquivo anexado"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        )}
                       </div>
                     </div>
                   ))}
@@ -1680,7 +1724,22 @@ export const VehicleDetailPage: React.FC<VehicleDetailPageProps> = ({
                         </span>
                         <span className="text-[10px] text-slate-400 block mt-1">{order.createdAt}</span>
                       </div>
-                      <ChevronRight className="w-4 h-4 text-slate-300 group-hover:text-[#ff5500] group-hover:translate-x-1 transition-all" />
+                      <div className="flex items-center gap-2">
+                        {isAdministrator && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setOsToDelete(order);
+                            }}
+                            className="p-1.5 rounded-lg text-slate-300 hover:text-rose-600 hover:bg-rose-50 transition cursor-pointer"
+                            title={`Excluir OS #${order.code}`}
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        )}
+                        <ChevronRight className="w-4 h-4 text-slate-300 group-hover:text-[#ff5500] group-hover:translate-x-1 transition-all" />
+                      </div>
                     </div>
                   </div>
                 ))}
@@ -2550,6 +2609,77 @@ export const VehicleDetailPage: React.FC<VehicleDetailPageProps> = ({
         isOpen={!!selectedOS}
         onClose={() => setSelectedOS(null)}
         os={selectedOS}
+      />
+
+      {/* Modal: Excluir Frota (Administrador) */}
+      <ConfirmDeleteModal
+        isOpen={deleteFleetModalOpen}
+        onClose={() => setDeleteFleetModalOpen(false)}
+        onConfirm={() => {
+          deleteVehicle(vehicle.id);
+          setDeleteFleetModalOpen(false);
+          onBack();
+        }}
+        title="Excluir Cadastro da Frota"
+        itemCategory="Veículo / Frota"
+        itemName={`Frota ${vehicle.fleetNumber} (${vehicle.plate}/${vehicle.uf})`}
+        description={`Tem certeza que deseja excluir permanentemente o cadastro da Frota ${vehicle.fleetNumber}? Todos os documentos, históricos, fotos e informações vinculadas a este veículo serão removidos.`}
+        warningNote="Esta ação é definitiva e removerá o veículo da base de dados."
+        confirmButtonText="Sim, Excluir Frota"
+      />
+
+      {/* Modal: Excluir Documento Obrigatório (Administrador) */}
+      <ConfirmDeleteModal
+        isOpen={!!docToDelete}
+        onClose={() => setDocToDelete(null)}
+        onConfirm={() => {
+          if (docToDelete) {
+            deleteVehicleDocument(vehicle.id, docToDelete.docType);
+            setDocToDelete(null);
+          }
+        }}
+        title="Excluir Documento da Frota"
+        itemCategory="Documentação Veicular"
+        itemName={docToDelete ? `${docToDelete.name} - Frota ${vehicle.fleetNumber}` : ''}
+        description={`Tem certeza que deseja remover o cadastro do documento ${docToDelete?.name} da Frota ${vehicle.fleetNumber}? Os dados de vencimento e arquivo associados serão excluídos.`}
+        warningNote="O documento voltará a constar como não cadastrado/pendente."
+        confirmButtonText="Excluir Documento"
+      />
+
+      {/* Modal: Excluir Anexo / Arquivo Digitalizado (Administrador) */}
+      <ConfirmDeleteModal
+        isOpen={!!attachmentToDelete}
+        onClose={() => setAttachmentToDelete(null)}
+        onConfirm={() => {
+          if (attachmentToDelete) {
+            removeVehicleAttachment(vehicle.id, attachmentToDelete.id);
+            setAttachmentToDelete(null);
+          }
+        }}
+        title="Excluir Arquivo Anexado"
+        itemCategory="Arquivo / Anexo"
+        itemName={attachmentToDelete?.name}
+        description={`Deseja excluir permanentemente o arquivo "${attachmentToDelete?.name}" da Frota ${vehicle.fleetNumber}?`}
+        warningNote="O arquivo digitalizado será apagado do armazenamento da frota."
+        confirmButtonText="Excluir Arquivo"
+      />
+
+      {/* Modal: Excluir Ordem de Serviço (Administrador) */}
+      <ConfirmDeleteModal
+        isOpen={!!osToDelete}
+        onClose={() => setOsToDelete(null)}
+        onConfirm={() => {
+          if (osToDelete) {
+            deleteServiceOrder(osToDelete.id);
+            setOsToDelete(null);
+          }
+        }}
+        title="Excluir Ordem de Serviço"
+        itemCategory="Manutenção / OS"
+        itemName={osToDelete ? `OS #${osToDelete.code} - ${osToDelete.title}` : ''}
+        description={`Tem certeza que deseja excluir permanentemente a Ordem de Serviço #${osToDelete?.code}? Todos os registros, fotos e notas de resolução serão removidos.`}
+        warningNote="Esta ação é irreversível e excluirá a OS do histórico desta frota."
+        confirmButtonText="Excluir OS"
       />
 
     </div>

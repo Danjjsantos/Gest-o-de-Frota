@@ -66,6 +66,7 @@ interface FleetContextType {
   addVehicle: (vehicleData: Omit<Vehicle, 'id' | 'createdAt'>) => Vehicle;
   updateVehicle: (id: string, updates: Partial<Vehicle>) => void;
   deleteVehicle: (id: string) => void;
+  deleteVehicleDocument: (vehicleId: string, docType: DocumentType) => void;
   updateVehicleDocument: (vehicleId: string, docType: DocumentType, expiryDate: string, number?: string) => void;
   updateVehicleDocumentWithFile: (
     vehicleId: string, 
@@ -979,6 +980,27 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     });
   };
 
+  const deleteVehicleDocument = (vehicleId: string, docType: DocumentType) => {
+    setVehicles(prev => {
+      const updated = prev.map(v => {
+        if (v.id !== vehicleId) return v;
+        const updatedDocs = {
+          ...v.documents,
+          [docType]: null,
+        };
+        // Also remove any attachments matching this docType
+        const updatedAttachments = (v.attachments || []).filter(a => a.category !== docType);
+        return {
+          ...v,
+          documents: updatedDocs,
+          attachments: updatedAttachments,
+        };
+      });
+      syncVehicleToSupabase(vehicleId, updated);
+      return updated;
+    });
+  };
+
   const calculateEquipmentStatus = (nextCalibrationDate?: string): 'valid' | 'expiring' | 'expired' => {
     if (!nextCalibrationDate) return 'valid';
     const diffDays = getDaysDifference(nextCalibrationDate);
@@ -1682,6 +1704,7 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       addVehicle,
       updateVehicle,
       deleteVehicle,
+      deleteVehicleDocument,
       updateVehicleDocument,
       updateVehicleDocumentWithFile,
       addVehicleAttachment,

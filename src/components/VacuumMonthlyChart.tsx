@@ -271,12 +271,18 @@ export const VacuumMonthlyChart: React.FC<VacuumMonthlyChartProps> = ({
   const currentMonthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
   const [selectedMonth, setSelectedMonth] = useState<string>(currentMonthKey);
 
-  // Filter only vehicles that carry "Gases do Ar"
+  // Filter only Carretas that carry "Gases do Ar" (strictly exclude CO2)
   const gasesDoArVehicles = useMemo(() => {
-    return vehicles.filter(v => 
-      (v.cargoProducts && v.cargoProducts.includes('Gases do Ar (LO2, LN2, LAR)')) ||
-      (v.cargoProduct && v.cargoProduct.includes('Gases do Ar'))
-    );
+    return vehicles.filter(v => {
+      if (v.type !== 'Carreta') return false;
+      const isCO2 = (v.cargoProduct && v.cargoProduct.includes('CO2')) || 
+                    (v.cargoProducts && v.cargoProducts.some(p => p.includes('CO2')));
+      if (isCO2) return false;
+      return (
+        (v.cargoProducts && v.cargoProducts.includes('Gases do Ar (LO2, LN2, LAR)')) ||
+        (v.cargoProduct && v.cargoProduct.includes('Gases do Ar'))
+      );
+    });
   }, [vehicles]);
 
   // Generate list of available months from data or recent 12 months
