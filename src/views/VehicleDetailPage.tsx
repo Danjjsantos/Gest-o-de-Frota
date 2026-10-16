@@ -48,11 +48,12 @@ interface VehicleDetailPageProps {
 type TabType = 'equipamentos' | 'geral' | 'documentos' | 'os';
 
 export const VehicleDetailPage: React.FC<VehicleDetailPageProps> = ({
-  vehicle,
+  vehicle: propVehicle,
   onBack,
   onOpenNewOS,
 }) => {
   const { 
+    vehicles,
     currentUser, 
     updateVehicle,
     deleteVehicle,
@@ -69,6 +70,11 @@ export const VehicleDetailPage: React.FC<VehicleDetailPageProps> = ({
     users,
     settings 
   } = useFleet();
+
+  // Dynamically resolve vehicle from FleetContext state so any updates to equipments, documents, or attachments reflect instantly without needing a page refresh
+  const vehicle = useMemo(() => {
+    return vehicles.find(v => v.id === propVehicle.id) || propVehicle;
+  }, [vehicles, propVehicle]);
 
   const isAdministrator = currentUser?.role === 'Administrador';
 
@@ -186,7 +192,7 @@ export const VehicleDetailPage: React.FC<VehicleDetailPageProps> = ({
     title?: string;
   } | null>(null);
 
-  const isAdmin = currentUser?.role === 'Administrador' || currentUser?.role === 'Gerente';
+  const isAdmin = currentUser?.role === 'Administrador' || currentUser?.role === 'Gerente' || currentUser?.role === 'Encarregado';
 
   const handleExportPDF = () => {
     generateVehicleDossierPDF(vehicle, serviceOrders, users);
@@ -509,10 +515,12 @@ export const VehicleDetailPage: React.FC<VehicleDetailPageProps> = ({
 
     const isMandatoryDoc = ['CRLV', 'CIPP', 'CIV', 'Tacógrafo'].includes(uploadCategory);
 
-    if (isMandatoryDoc && uploadExpiryDate) {
+    if (isMandatoryDoc) {
+      const existingDoc = vehicle.documents[uploadCategory as DocumentType];
+      const effectiveExpiryDate = uploadExpiryDate || existingDoc?.expiryDate || '';
       updateVehicleDocumentWithFile(vehicle.id, uploadCategory as DocumentType, {
-        expiryDate: uploadExpiryDate,
-        number: uploadDocNumber.trim() || undefined,
+        expiryDate: effectiveExpiryDate,
+        number: uploadDocNumber.trim() || existingDoc?.number || undefined,
         notes: uploadNotes.trim() || undefined,
         fileName: docSelectedFile.name,
         fileType: docSelectedFile.type,
@@ -546,10 +554,10 @@ export const VehicleDetailPage: React.FC<VehicleDetailPageProps> = ({
     if (!equipmentSearch.trim()) return true;
     const query = equipmentSearch.toLowerCase();
     return (
-      eq.description.toLowerCase().includes(query) ||
-      eq.company.toLowerCase().includes(query) ||
-      eq.tag.toLowerCase().includes(query) ||
-      eq.certificateNumber.toLowerCase().includes(query)
+      (eq.description || '').toLowerCase().includes(query) ||
+      (eq.company || '').toLowerCase().includes(query) ||
+      (eq.tag || '').toLowerCase().includes(query) ||
+      (eq.certificateNumber || '').toLowerCase().includes(query)
     );
   });
 
@@ -1235,11 +1243,6 @@ export const VehicleDetailPage: React.FC<VehicleDetailPageProps> = ({
                   <span className="font-mono font-bold text-slate-800 text-sm mt-0.5 block">
                     {vehicle.plate} / {vehicle.uf}
                   </span>
-                </div>
-
-                <div>
-                  <span className="text-slate-400 block font-medium">Data de Cadastro</span>
-                  <span className="font-medium text-slate-700 mt-0.5 block">{vehicle.createdAt || '01/01/2026'}</span>
                 </div>
 
                 <div>

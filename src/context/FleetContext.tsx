@@ -29,6 +29,11 @@ import {
   sendBrowserPushNotification 
 } from '../utils/notificationAlerts';
 import { 
+  saveVehiclesToIdb, 
+  loadVehiclesFromIdb, 
+  safeSaveVehiclesToLocalStorage 
+} from '../utils/fileStorage';
+import { 
   SupabaseService, 
   toFrontendVehicle, 
   toFrontendServiceOrder, 
@@ -356,13 +361,46 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
 
 
-  // Sync to localStorage
+  // Asynchronously load full vehicles from IndexedDB to ensure equipments & files are never lost
+  useEffect(() => {
+    let isMounted = true;
+    loadVehiclesFromIdb().then(idbVehicles => {
+      if (isMounted && idbVehicles && idbVehicles.length > 0) {
+        setVehicles(prev => {
+          return idbVehicles.map(iv => {
+            const enriched = enrichVehicleCargoProducts(iv);
+            const local = prev.find(p => p.id === enriched.id);
+            if (!local) return enriched;
+            const mergedEqs = [
+              ...(enriched.equipments || []),
+              ...((local.equipments || []).filter(le => !(enriched.equipments || []).some(ee => ee.id === le.id)))
+            ];
+            const mergedAtts = [
+              ...(enriched.attachments || []),
+              ...((local.attachments || []).filter(la => !(enriched.attachments || []).some(ea => ea.id === la.id)))
+            ];
+            return {
+              ...enriched,
+              ...local,
+              documents: { ...(local.documents || {}), ...(enriched.documents || {}) },
+              attachments: mergedAtts,
+              equipments: mergedEqs,
+            };
+          });
+        });
+      }
+    });
+    return () => { isMounted = false; };
+  }, []);
+
+  // Sync to localStorage and IndexedDB with quota protection
   useEffect(() => {
     localStorage.setItem('gestao_frotas_users', JSON.stringify(users));
   }, [users]);
 
   useEffect(() => {
-    localStorage.setItem('gestao_frotas_vehicles', JSON.stringify(vehicles));
+    safeSaveVehiclesToLocalStorage(vehicles);
+    saveVehiclesToIdb(vehicles);
   }, [vehicles]);
 
   useEffect(() => {
@@ -580,10 +618,37 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         const remote = await SupabaseService.fetchAll();
         if (!isMounted) return;
 
-        // Se o Supabase já tem veículos, sincroniza o estado da aplicação
+        // Se o Supabase já tem veículos, sincroniza preservando equipamentos e anexos locais
         if (remote.vehicles.length > 0) {
           const enriched = remote.vehicles.map(enrichVehicleCargoProducts);
-          setVehicles(enriched);
+          setVehicles(prev => {
+            return enriched.map(remoteV => {
+              const localV = prev.find(v => v.id === remoteV.id);
+              if (!localV) return remoteV;
+
+              const remoteEqs = remoteV.equipments || [];
+              const localEqs = localV.equipments || [];
+              const remoteEqIds = new Set(remoteEqs.map(e => e.id));
+              const missingLocalEqs = localEqs.filter(e => !remoteEqIds.has(e.id));
+              const mergedEquipments = [...remoteEqs, ...missingLocalEqs];
+
+              const remoteAtts = remoteV.attachments || [];
+              const localAtts = localV.attachments || [];
+              const remoteAttIds = new Set(remoteAtts.map(a => a.id));
+              const missingLocalAtts = localAtts.filter(a => !remoteAttIds.has(a.id));
+              const mergedAttachments = [...remoteAtts, ...missingLocalAtts];
+
+              return {
+                ...remoteV,
+                documents: {
+                  ...(localV.documents || {}),
+                  ...(remoteV.documents || {})
+                },
+                attachments: mergedAttachments,
+                equipments: mergedEquipments,
+              };
+            });
+          });
         } else if (isInitial && vehicles.length > 0) {
           // Se o banco estiver vazio na primeira execução, popula com os dados atuais
           SupabaseService.pushAll(vehicles, serviceOrders, users, notifications).catch(err => {
@@ -613,9 +678,31 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         if ((event === 'INSERT' || event === 'UPDATE') && payload.new) {
           const veh = enrichVehicleCargoProducts(toFrontendVehicle(payload.new));
           setVehicles(prev => {
-            const exists = prev.some(v => v.id === veh.id);
-            if (exists) {
-              return prev.map(v => v.id === veh.id ? veh : v);
+            const localV = prev.find(v => v.id === veh.id);
+            if (localV) {
+              const remoteEqs = veh.equipments || [];
+              const localEqs = localV.equipments || [];
+              const remoteEqIds = new Set(remoteEqs.map(e => e.id));
+              const missingLocalEqs = localEqs.filter(e => !remoteEqIds.has(e.id));
+              const mergedEquipments = [...remoteEqs, ...missingLocalEqs];
+
+              const remoteAtts = veh.attachments || [];
+              const localAtts = localV.attachments || [];
+              const remoteAttIds = new Set(remoteAtts.map(a => a.id));
+              const missingLocalAtts = localAtts.filter(a => !remoteAttIds.has(a.id));
+              const mergedAttachments = [...remoteAtts, ...missingLocalAtts];
+
+              const mergedVehicle: Vehicle = {
+                ...localV,
+                ...veh,
+                documents: {
+                  ...(localV.documents || {}),
+                  ...(veh.documents || {})
+                },
+                attachments: mergedAttachments,
+                equipments: mergedEquipments,
+              };
+              return prev.map(v => v.id === veh.id ? mergedVehicle : v);
             }
             return [veh, ...prev];
           });

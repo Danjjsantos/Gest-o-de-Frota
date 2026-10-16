@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useMemo } from 'react';
 import { 
   X, 
   Calendar, 
@@ -39,12 +39,13 @@ interface VehicleDetailModalProps {
 type TabType = 'geral' | 'documentos' | 'os';
 
 export const VehicleDetailModal: React.FC<VehicleDetailModalProps> = ({
-  vehicle,
+  vehicle: propVehicle,
   isOpen,
   onClose,
   onOpenNewOSForVehicle,
 }) => {
   const { 
+    vehicles,
     currentUser, 
     deleteVehicle,
     deleteVehicleDocument,
@@ -57,6 +58,12 @@ export const VehicleDetailModal: React.FC<VehicleDetailModalProps> = ({
     users,
     settings
   } = useFleet();
+
+  // Dynamically resolve vehicle from FleetContext state so any updates to documents, attachments reflect immediately without reloading
+  const vehicle = useMemo(() => {
+    if (!propVehicle) return null;
+    return vehicles.find(v => v.id === propVehicle.id) || propVehicle;
+  }, [vehicles, propVehicle]);
 
   const [activeTab, setActiveTab] = useState<TabType>('geral');
   const [editingDoc, setEditingDoc] = useState<DocumentType | null>(null);
@@ -97,7 +104,7 @@ export const VehicleDetailModal: React.FC<VehicleDetailModalProps> = ({
 
   if (!isOpen || !vehicle) return null;
 
-  const isAdmin = currentUser?.role === 'Administrador';
+  const isAdmin = currentUser?.role === 'Administrador' || currentUser?.role === 'Gerente' || currentUser?.role === 'Encarregado';
 
   const handleExportPDF = () => {
     generateVehicleDossierPDF(vehicle, serviceOrders, users);
@@ -190,11 +197,13 @@ export const VehicleDetailModal: React.FC<VehicleDetailModalProps> = ({
 
     const isMandatoryDoc = ['CRLV', 'CIPP', 'CIV', 'Tacógrafo'].includes(uploadCategory);
 
-    // If it's a mandatory document and an expiry date was entered, update the main document slot
-    if (isMandatoryDoc && uploadExpiryDate) {
+    // If it's a mandatory document, update the main document slot
+    if (isMandatoryDoc) {
+      const existingDoc = vehicle.documents[uploadCategory as DocumentType];
+      const effectiveExpiryDate = uploadExpiryDate || existingDoc?.expiryDate || '';
       updateVehicleDocumentWithFile(vehicle.id, uploadCategory as DocumentType, {
-        expiryDate: uploadExpiryDate,
-        number: uploadDocNumber.trim() || undefined,
+        expiryDate: effectiveExpiryDate,
+        number: uploadDocNumber.trim() || existingDoc?.number || undefined,
         notes: uploadNotes.trim() || undefined,
         fileName: selectedFile.name,
         fileType: selectedFile.type,
@@ -568,11 +577,6 @@ export const VehicleDetailModal: React.FC<VehicleDetailModalProps> = ({
                       <span className="font-mono font-bold text-slate-800 text-sm">
                         {vehicle.plate}/{vehicle.uf}
                       </span>
-                    </div>
-
-                    <div>
-                      <span className="text-slate-400 block font-medium">Data de Cadastro</span>
-                      <span className="font-medium text-slate-700">{vehicle.createdAt || '01/01/2026'}</span>
                     </div>
 
                     <div>
@@ -1014,7 +1018,7 @@ export const VehicleDetailModal: React.FC<VehicleDetailModalProps> = ({
                     </div>
                   ) : (
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      {allAttachments.map(att => {
+                      {allAttachments.map((att: any) => {
                         const isPdf = att.fileType === 'application/pdf' || att.name.toLowerCase().endsWith('.pdf');
                         return (
                           <div 
