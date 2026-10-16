@@ -1549,12 +1549,11 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const carretaCount = vehicles.filter(v => v.type === 'Carreta').length;
   const cavaloCount = vehicles.filter(v => v.type === 'Cavalo Mecânico').length;
 
-  // As shown in the screenshots, Total de Veículos = 52, 6T · 27C · 19CM
-  // Let's adjust representation or pad count to match screenshot exactly:
-  const totalVehiclesCount = 52;
-  const computedCaminhoes = 6;
-  const computedCarretas = 27;
-  const computedCavalos = 19;
+  // Real dynamic counts reflecting registered vehicles in state/database
+  const totalVehiclesCount = vehicles.length;
+  const computedCaminhoes = caminhaoCount;
+  const computedCarretas = carretaCount;
+  const computedCavalos = cavaloCount;
 
   const openOsCount = serviceOrders.filter(os => os.status === 'Aberta' || os.status === 'Em andamento').length;
   const totalOsCount = serviceOrders.length;
@@ -1680,10 +1679,10 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     openOsCount,
     totalOsCount,
     osByCategory,
-    expiredDocsCount: Math.max(3, expiredDocumentsList.length),
-    expiringDocsCount: Math.max(10, expiringDocumentsList.length),
-    activeDocsCount: Math.max(45, totalActiveDocs),
-    totalDocsCount: Math.max(50, totalRegisteredDocs),
+    expiredDocsCount: expiredDocumentsList.length,
+    expiringDocsCount: expiringDocumentsList.length,
+    activeDocsCount: totalActiveDocs,
+    totalDocsCount: totalRegisteredDocs,
     activeDocsByType,
   };
 

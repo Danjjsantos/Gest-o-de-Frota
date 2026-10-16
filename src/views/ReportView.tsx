@@ -334,7 +334,7 @@ export const ReportView: React.FC = () => {
                 </span>
                 <span className="text-xs font-bold text-blue-900">Caminhões</span>
                 <span className="text-[10px] text-blue-600 block mt-0.5">
-                  {Math.round((stats.caminhaoCount / stats.totalVehicles) * 100)}% da frota
+                  {stats.totalVehicles > 0 ? Math.round((stats.caminhaoCount / stats.totalVehicles) * 100) : 0}% da frota
                 </span>
               </div>
 
@@ -344,7 +344,7 @@ export const ReportView: React.FC = () => {
                 </span>
                 <span className="text-xs font-bold text-purple-900">Carretas / Tanques</span>
                 <span className="text-[10px] text-purple-600 block mt-0.5">
-                  {Math.round((stats.carretaCount / stats.totalVehicles) * 100)}% da frota
+                  {stats.totalVehicles > 0 ? Math.round((stats.carretaCount / stats.totalVehicles) * 100) : 0}% da frota
                 </span>
               </div>
 
@@ -354,7 +354,7 @@ export const ReportView: React.FC = () => {
                 </span>
                 <span className="text-xs font-bold text-emerald-900">Cavalos Mecânicos</span>
                 <span className="text-[10px] text-emerald-600 block mt-0.5">
-                  {Math.round((stats.cavaloCount / stats.totalVehicles) * 100)}% da frota
+                  {stats.totalVehicles > 0 ? Math.round((stats.cavaloCount / stats.totalVehicles) * 100) : 0}% da frota
                 </span>
               </div>
             </div>

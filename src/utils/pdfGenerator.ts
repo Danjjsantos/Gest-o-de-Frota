@@ -91,12 +91,12 @@ export const generateDashboardPDF = (
     head: [['Indicador Operacional', 'Quantidade', 'Representatividade', 'Status da Operação']],
     body: [
       ['Total de Veículos Monitorados', `${stats.totalVehicles}`, '100%', 'Frota Total Registrada'],
-      ['Caminhões (Tocos / Trucados)', `${stats.caminhaoCount}`, `${Math.round((stats.caminhaoCount / stats.totalVehicles) * 100)}%`, 'Veículos de Distribuição'],
-      ['Carretas (Tanques / Criogênicos)', `${stats.carretaCount}`, `${Math.round((stats.carretaCount / stats.totalVehicles) * 100)}%`, 'Semirreboques'],
-      ['Cavalos Mecânicos (Tração)', `${stats.cavaloCount}`, `${Math.round((stats.cavaloCount / stats.totalVehicles) * 100)}%`, 'Unidades Tratoras'],
-      ['Veículos Ativos / Disponíveis', `${activeCount}`, `${Math.round((activeCount / vehicles.length) * 100)}%`, 'Em Operação Regular'],
-      ['Veículos em Manutenção', `${maintenanceCount}`, `${Math.round((maintenanceCount / vehicles.length) * 100)}%`, maintenanceCount > 0 ? 'Indisponibilidade Técnica' : 'Nenhuma Parada'],
-      ['Veículos Inativos / Reserva', `${inactiveCount}`, `${Math.round((inactiveCount / vehicles.length) * 100)}%`, 'Imobilizados / Desativados'],
+      ['Caminhões (Tocos / Trucados)', `${stats.caminhaoCount}`, `${stats.totalVehicles > 0 ? Math.round((stats.caminhaoCount / stats.totalVehicles) * 100) : 0}%`, 'Veículos de Distribuição'],
+      ['Carretas (Tanques / Criogênicos)', `${stats.carretaCount}`, `${stats.totalVehicles > 0 ? Math.round((stats.carretaCount / stats.totalVehicles) * 100) : 0}%`, 'Semirreboques'],
+      ['Cavalos Mecânicos (Tração)', `${stats.cavaloCount}`, `${stats.totalVehicles > 0 ? Math.round((stats.cavaloCount / stats.totalVehicles) * 100) : 0}%`, 'Unidades Tratoras'],
+      ['Veículos Ativos / Disponíveis', `${activeCount}`, `${vehicles.length > 0 ? Math.round((activeCount / vehicles.length) * 100) : 0}%`, 'Em Operação Regular'],
+      ['Veículos em Manutenção', `${maintenanceCount}`, `${vehicles.length > 0 ? Math.round((maintenanceCount / vehicles.length) * 100) : 0}%`, maintenanceCount > 0 ? 'Indisponibilidade Técnica' : 'Nenhuma Parada'],
+      ['Veículos Inativos / Reserva', `${inactiveCount}`, `${vehicles.length > 0 ? Math.round((inactiveCount / vehicles.length) * 100) : 0}%`, 'Imobilizados / Desativados'],
     ],
   });
 

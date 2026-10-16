@@ -212,7 +212,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               OS Abertas
             </p>
             <p className="text-[10px] sm:text-xs font-medium text-slate-400">
-              Ordens em andamento
+              {serviceOrders.filter(os => os.status === 'Aberta').length} abertas · {serviceOrders.filter(os => os.status === 'Em andamento').length} em andamento
             </p>
           </div>
         </div>
