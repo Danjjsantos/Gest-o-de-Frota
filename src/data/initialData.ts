@@ -696,6 +696,11 @@ export const INITIAL_VEHICLES: Vehicle[] = [
     renavam: '01284756211',
     color: 'Branco',
     status: 'Ativo',
+    cargoProducts: ['Gases do Ar (LO2, LN2, LAR)'],
+    cargoProduct: 'Gases do Ar (LO2, LN2, LAR)',
+    vacuumValue: '42',
+    vacuumDate: '2026-10-07',
+    vacuumUnit: 'mtorr',
     createdAt: '2026-03-12',
     documents: {
       CRLV: { type: 'CRLV', expiryDate: '2027-08-15', status: 'valid' },
@@ -716,6 +721,8 @@ export const INITIAL_VEHICLES: Vehicle[] = [
     renavam: '01384756212',
     color: 'Azul',
     status: 'Ativo',
+    cargoProducts: ['CO2'],
+    cargoProduct: 'CO2',
     createdAt: '2026-03-15',
     documents: {
       CRLV: { type: 'CRLV', expiryDate: '2027-09-10', status: 'valid' },
@@ -736,6 +743,11 @@ export const INITIAL_VEHICLES: Vehicle[] = [
     renavam: '01484756213',
     color: 'Branco',
     status: 'Ativo',
+    cargoProducts: ['Gases do Ar (LO2, LN2, LAR)'],
+    cargoProduct: 'Gases do Ar (LO2, LN2, LAR)',
+    vacuumValue: '68',
+    vacuumDate: '2026-10-05',
+    vacuumUnit: 'mtorr',
     createdAt: '2026-03-20',
     documents: {
       CRLV: { type: 'CRLV', expiryDate: '2027-11-05', status: 'valid' },

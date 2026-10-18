@@ -258,14 +258,14 @@ export const generateDashboardPDF = (
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(11);
   doc.setTextColor(30, 41, 59);
-  doc.text('5. MONITORAMENTO DE VÁCUO DAS CARRETAS CRIOGÊNICAS (GASES DO AR)', 10, currentY);
+  doc.text('5. MONITORAMENTO DE VÁCUO DAS FROTAS CRIOGÊNICAS (GASES DO AR)', 10, currentY);
   currentY += 4;
 
-  // Filtrar estritamente Carretas que transportam Gases do Ar (LO2, LN2, LAR)
-  // O vácuo é exclusivo para carretas de Gases do Ar — não selecionar veículos de CO2
+  // Filtrar estritamente Carretas e Caminhões que transportam Gases do Ar (LO2, LN2, LAR)
+  // O vácuo é exclusivo para frotas de Gases do Ar — não selecionar veículos de CO2 nem cavalos mecânicos
   const cryogenicVehicles = vehicles.filter(v => {
-    // 1. Deve ser do tipo Carreta
-    if (v.type !== 'Carreta') return false;
+    // 1. Deve ser do tipo Carreta ou Caminhão
+    if (v.type !== 'Carreta' && v.type !== 'Caminhão') return false;
 
     // 2. Não selecionar veículos do tipo CO2
     const isCO2 = (v.cargoProduct && v.cargoProduct.includes('CO2')) ||

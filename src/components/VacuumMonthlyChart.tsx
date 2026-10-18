@@ -32,6 +32,7 @@ interface VacuumMonthlyChartProps {
 // Helper to generate a pristine, high-resolution canvas of the monthly vacuum chart
 function generateVacuumChartCanvas(
   monthlyData: Array<{
+    vehicle?: Vehicle;
     fleetNumber: string;
     plate: string;
     model: string;
@@ -241,10 +242,11 @@ function generateVacuumChartCanvas(
     ctx.font = 'bold 11px Arial, sans-serif';
     ctx.fillText(`Frota ${item.fleetNumber}`, xPos + barWidth / 2, chartBottom + 16);
 
-    // Plate under fleet
+    // Plate and type under fleet
     ctx.fillStyle = '#64748b';
     ctx.font = '9px monospace';
-    ctx.fillText(item.plate, xPos + barWidth / 2, chartBottom + 29);
+    const typeLabel = item.vehicle?.type === 'Caminhão' ? ' · Cam.' : '';
+    ctx.fillText(`${item.plate}${typeLabel}`, xPos + barWidth / 2, chartBottom + 29);
 
     ctx.textAlign = 'left';
   });
@@ -271,10 +273,10 @@ export const VacuumMonthlyChart: React.FC<VacuumMonthlyChartProps> = ({
   const currentMonthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
   const [selectedMonth, setSelectedMonth] = useState<string>(currentMonthKey);
 
-  // Filter only Carretas that carry "Gases do Ar" (strictly exclude CO2)
+  // Filter Carretas and Caminhões that carry "Gases do Ar" (strictly exclude CO2 and Cavalo Mecânico)
   const gasesDoArVehicles = useMemo(() => {
     return vehicles.filter(v => {
-      if (v.type !== 'Carreta') return false;
+      if (v.type !== 'Carreta' && v.type !== 'Caminhão') return false;
       const isCO2 = (v.cargoProduct && v.cargoProduct.includes('CO2')) || 
                     (v.cargoProducts && v.cargoProducts.some(p => p.includes('CO2')));
       if (isCO2) return false;
@@ -501,7 +503,7 @@ export const VacuumMonthlyChart: React.FC<VacuumMonthlyChartProps> = ({
           return [
             `Frota ${item.fleetNumber}`,
             `${item.plate} / ${item.vehicle.uf}`,
-            item.model,
+            `${item.vehicle.type || 'Frota'} · ${item.model}`,
             `${item.value} mtorr`,
             formatDisplayDate(item.date),
             statusText,
@@ -511,7 +513,7 @@ export const VacuumMonthlyChart: React.FC<VacuumMonthlyChartProps> = ({
 
         autoTable(doc, {
           startY: 24,
-          head: [['Frota', 'Placa/UF', 'Modelo', 'Vácuo (mtorr)', 'Data Medição', 'Faixa de Aceitação', 'Recomendação Técnica']],
+          head: [['Frota', 'Placa/UF', 'Tipo / Modelo', 'Vácuo (mtorr)', 'Data Medição', 'Faixa de Aceitação', 'Recomendação Técnica']],
           body: tableRows,
           theme: 'grid',
           headStyles: {
@@ -810,7 +812,12 @@ export const VacuumMonthlyChart: React.FC<VacuumMonthlyChartProps> = ({
                       return (
                         <div className="bg-slate-900 text-white p-3 rounded-xl shadow-xl border border-slate-700 text-xs space-y-1.5 min-w-[200px]">
                           <div className="flex items-center justify-between border-b border-slate-800 pb-1">
-                            <span className="font-black text-sm text-[#ff5500]">Frota {item.fleetNumber}</span>
+                            <div className="flex items-center gap-1.5">
+                              <span className="font-black text-sm text-[#ff5500]">Frota {item.fleetNumber}</span>
+                              <span className="text-[10px] px-1.5 py-0.5 rounded font-bold bg-slate-800 text-slate-300 border border-slate-700">
+                                {item.vehicle.type}
+                              </span>
+                            </div>
                             <span className="font-mono text-[10px] text-slate-400">{item.plate}</span>
                           </div>
                           <p className="text-slate-300 font-medium">{item.model}</p>

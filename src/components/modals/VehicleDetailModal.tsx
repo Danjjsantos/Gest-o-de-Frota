@@ -933,18 +933,29 @@ export const VehicleDetailModal: React.FC<VehicleDetailModalProps> = ({
                                 {getDocStatusBadge(dtype)}
 
                                 {doc?.fileUrl && (
-                                  <button
-                                    onClick={() => setPreviewFile({
-                                      name: doc.fileName || `${dtype}_Frota_${vehicle.fleetNumber}`,
-                                      dataUrl: doc.fileUrl!,
-                                      type: doc.fileType || 'application/pdf',
-                                      category: dtype
-                                    })}
-                                    className="p-1.5 rounded-lg text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition cursor-pointer"
-                                    title="Visualizar documento anexado"
-                                  >
-                                    <Eye className="w-4 h-4 text-[#ff5500]" />
-                                  </button>
+                                  <>
+                                    <button
+                                      onClick={() => setPreviewFile({
+                                        name: doc.fileName || `${dtype}_Frota_${vehicle.fleetNumber}`,
+                                        dataUrl: doc.fileUrl!,
+                                        type: doc.fileType || 'application/pdf',
+                                        category: dtype
+                                      })}
+                                      className="p-1.5 rounded-lg text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition cursor-pointer"
+                                      title="Visualizar documento anexado"
+                                    >
+                                      <Eye className="w-4 h-4 text-[#ff5500]" />
+                                    </button>
+
+                                    <a
+                                      href={doc.fileUrl}
+                                      download={doc.fileName || `${dtype}_Frota_${vehicle.fleetNumber}.pdf`}
+                                      className="p-1.5 rounded-lg text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition cursor-pointer"
+                                      title="Baixar documento anexado"
+                                    >
+                                      <Download className="w-4 h-4 text-slate-600" />
+                                    </a>
+                                  </>
                                 )}
 
                                 {isApplicable && isAdmin && (

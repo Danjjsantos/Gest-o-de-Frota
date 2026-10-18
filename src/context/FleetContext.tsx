@@ -299,10 +299,37 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   });
 
   const [vehicles, setVehicles] = useState<Vehicle[]>(() => {
-    const saved = localStorage.getItem('gestao_frotas_vehicles');
-    const rawList: Vehicle[] = saved ? JSON.parse(saved) : INITIAL_VEHICLES;
+    let rawList: Vehicle[] = INITIAL_VEHICLES;
+    try {
+      const saved = localStorage.getItem('gestao_frotas_vehicles');
+      if (saved) {
+        rawList = JSON.parse(saved);
+      }
+    } catch {}
+
+    // Check dedicated equipment backup to ensure no equipments are lost
+    try {
+      const eqBackupStr = localStorage.getItem('gestao_frotas_equipments_backup');
+      if (eqBackupStr) {
+        const eqBackup = JSON.parse(eqBackupStr);
+        rawList = rawList.map(v => {
+          const backedUp = eqBackup[v.id];
+          if (backedUp && Array.isArray(backedUp) && backedUp.length > 0) {
+            const currentIds = new Set((v.equipments || []).map(e => e.id));
+            const merged = [
+              ...(v.equipments || []),
+              ...backedUp.filter((be: any) => !currentIds.has(be.id))
+            ];
+            return { ...v, equipments: merged };
+          }
+          return v;
+        });
+      }
+    } catch {}
+
     return rawList.map(enrichVehicleCargoProducts);
   });
+
 
   const [serviceOrders, setServiceOrders] = useState<ServiceOrder[]>(() => {
     const saved = localStorage.getItem('gestao_frotas_os');
@@ -367,26 +394,35 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     loadVehiclesFromIdb().then(idbVehicles => {
       if (isMounted && idbVehicles && idbVehicles.length > 0) {
         setVehicles(prev => {
-          return idbVehicles.map(iv => {
-            const enriched = enrichVehicleCargoProducts(iv);
-            const local = prev.find(p => p.id === enriched.id);
-            if (!local) return enriched;
-            const mergedEqs = [
-              ...(enriched.equipments || []),
-              ...((local.equipments || []).filter(le => !(enriched.equipments || []).some(ee => ee.id === le.id)))
-            ];
-            const mergedAtts = [
-              ...(enriched.attachments || []),
-              ...((local.attachments || []).filter(la => !(enriched.attachments || []).some(ea => ea.id === la.id)))
-            ];
+          // Iterate over all prev vehicles and merge with IDB data
+          const updatedList = prev.map(local => {
+            const idbMatch = idbVehicles.find(iv => iv.id === local.id);
+            if (!idbMatch) return local;
+            const enriched = enrichVehicleCargoProducts(idbMatch);
+            const currentEqIds = new Set((local.equipments || []).map(e => e.id));
+            const extraEqs = (enriched.equipments || []).filter(ee => !currentEqIds.has(ee.id));
+            const mergedEqs = [...(local.equipments || []), ...extraEqs];
+
+            const currentAttIds = new Set((local.attachments || []).map(a => a.id));
+            const extraAtts = (enriched.attachments || []).filter(ea => !currentAttIds.has(ea.id));
+            const mergedAtts = [...(local.attachments || []), ...extraAtts];
+
             return {
               ...enriched,
               ...local,
-              documents: { ...(local.documents || {}), ...(enriched.documents || {}) },
+              documents: { ...(enriched.documents || {}), ...(local.documents || {}) },
               attachments: mergedAtts,
               equipments: mergedEqs,
             };
           });
+
+          // Also bring in any vehicles that might be in IDB but not in prev
+          const prevIds = new Set(prev.map(p => p.id));
+          const missingVehicles = idbVehicles
+            .filter(iv => !prevIds.has(iv.id))
+            .map(enrichVehicleCargoProducts);
+
+          return [...updatedList, ...missingVehicles];
         });
       }
     });
@@ -1102,11 +1138,14 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         if (v.id !== vehicleId) return v;
         const effectiveDate = equipment.nextCalibrationDate || equipment.calibrationDate;
         const status = calculateEquipmentStatus(effectiveDate);
+        const file = equipment.dataUrl || equipment.fileUrl;
         const newEq: VehicleEquipment = {
           ...equipment,
           id: `eq-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
           status: equipment.status || status,
-          uploadedAt: equipment.fileUrl ? (equipment.uploadedAt || new Date().toLocaleDateString('pt-BR')) : undefined,
+          fileUrl: file,
+          dataUrl: file,
+          uploadedAt: file ? (equipment.uploadedAt || new Date().toLocaleDateString('pt-BR')) : undefined,
           uploadedBy: equipment.uploadedBy || (currentUser ? `${currentUser.name} (${currentUser.role})` : 'Administrador'),
         };
 
@@ -1128,6 +1167,8 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           equipments: [newEq, ...existing],
         };
       });
+      safeSaveVehiclesToLocalStorage(updated);
+      saveVehiclesToIdb(updated);
       syncVehicleToSupabase(vehicleId, updated);
       return updated;
     });
@@ -1141,6 +1182,11 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         const updatedEquipments = existing.map(eq => {
           if (eq.id !== equipmentId) return eq;
           const merged = { ...eq, ...updates };
+          const file = updates.dataUrl || updates.fileUrl || eq.dataUrl || eq.fileUrl;
+          if (file) {
+            merged.fileUrl = file;
+            merged.dataUrl = file;
+          }
           const effectiveDate = updates.nextCalibrationDate || merged.nextCalibrationDate || updates.calibrationDate || merged.calibrationDate;
           if (effectiveDate) {
             merged.status = calculateEquipmentStatus(effectiveDate);
@@ -1152,6 +1198,8 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           equipments: updatedEquipments,
         };
       });
+      safeSaveVehiclesToLocalStorage(updated);
+      saveVehiclesToIdb(updated);
       syncVehicleToSupabase(vehicleId, updated);
       return updated;
     });
@@ -1166,6 +1214,8 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           equipments: (v.equipments || []).filter(e => e.id !== equipmentId),
         };
       });
+      safeSaveVehiclesToLocalStorage(updated);
+      saveVehiclesToIdb(updated);
       syncVehicleToSupabase(vehicleId, updated);
       return updated;
     });

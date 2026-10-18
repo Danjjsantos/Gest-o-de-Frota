@@ -74,7 +74,8 @@ export function safeSaveVehiclesToLocalStorage(vehicles: any[]): void {
         })),
         equipments: (v.equipments || []).map((e: any) => ({
           ...e,
-          fileUrl: (e.fileUrl && e.fileUrl.length > 25000) ? '' : e.fileUrl
+          fileUrl: (e.fileUrl && e.fileUrl.length > 25000) ? '' : e.fileUrl,
+          dataUrl: (e.dataUrl && e.dataUrl.length > 25000) ? '' : e.dataUrl,
         })),
         documents: Object.fromEntries(
           Object.entries(v.documents || {}).map(([k, d]: [string, any]) => [
@@ -88,4 +89,16 @@ export function safeSaveVehiclesToLocalStorage(vehicles: any[]): void {
       console.debug('Failed to save to localStorage fallback:', fallbackErr);
     }
   }
+
+  // Always save a dedicated equipments map backup so equipments are never lost
+  try {
+    const equipmentMap: Record<string, any[]> = {};
+    vehicles.forEach(v => {
+      if (v.equipments && v.equipments.length > 0) {
+        equipmentMap[v.id] = v.equipments;
+      }
+    });
+    localStorage.setItem('gestao_frotas_equipments_backup', JSON.stringify(equipmentMap));
+  } catch {}
 }
+

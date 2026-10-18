@@ -97,11 +97,11 @@ export const ReportView: React.FC = () => {
 
   const displayVehicles = activeFilter === 'all' ? vehicles : pendingVehicles;
 
-  // Carretas exclusivas de Gases do Ar (LO2, LN2, LAR) para monitoramento de vácuo (excluindo tipo CO2)
+  // Carretas e Caminhões exclusivos de Gases do Ar (LO2, LN2, LAR) para monitoramento de vácuo (excluindo tipo CO2)
   const vacuumCarretasGasesDoAr = useMemo(() => {
     return vehicles.filter(v => {
-      // 1. Deve ser Carreta
-      if (v.type !== 'Carreta') return false;
+      // 1. Deve ser Carreta ou Caminhão
+      if (v.type !== 'Carreta' && v.type !== 'Caminhão') return false;
 
       // 2. Não pode ser veículo do tipo CO2
       const isCO2 = (v.cargoProduct && v.cargoProduct.includes('CO2')) || 
@@ -563,15 +563,15 @@ export const ReportView: React.FC = () => {
             </div>
           </div>
 
-          {/* 5. Monitoramento de Vácuo das Carretas Criogênicas (Gases do Ar) */}
+          {/* 5. Monitoramento de Vácuo das Frotas Criogênicas (Gases do Ar) */}
           <div className="space-y-3 pt-4 border-t border-slate-100">
             <div className="flex items-center justify-between">
               <h3 className="text-xs font-black uppercase tracking-wider text-slate-900 flex items-center gap-2">
                 <Gauge className="w-4 h-4 text-blue-600" />
-                <span>5. Monitoramento de Vácuo das Carretas Criogênicas (Gases do Ar)</span>
+                <span>5. Monitoramento de Vácuo das Frotas Criogênicas (Gases do Ar)</span>
               </h3>
               <span className="text-xs font-semibold text-slate-500">
-                Carretas Gases do Ar: <strong className="text-slate-900 font-mono">{vacuumCarretasGasesDoAr.length}</strong> (Excluído tipo CO2)
+                Frotas Gases do Ar: <strong className="text-slate-900 font-mono">{vacuumCarretasGasesDoAr.length}</strong> (Carretas e Caminhões)
               </span>
             </div>
 

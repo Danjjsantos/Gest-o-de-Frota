@@ -206,9 +206,13 @@ export const VehicleDetailPage: React.FC<VehicleDetailPageProps> = ({
       (os: ServiceOrder) => os.status === 'Aberta' || os.status === 'Em andamento' || os.status === 'Resolvida'
     );
   }, [vehicleOrders]);
+
   const docTypes: DocumentType[] = ['CRLV', 'CIPP', 'CIV', 'Tacógrafo'];
   const allAttachments = vehicle.attachments || [];
   const allEquipments = vehicle.equipments || [];
+  const registeredDocsCount = useMemo(() => {
+    return Object.values(vehicle.documents || {}).filter(d => d && (d.fileUrl || d.expiryDate)).length;
+  }, [vehicle.documents]);
 
   const formatFileSize = (bytes: number): string => {
     if (bytes === 0) return '0 B';
@@ -331,10 +335,13 @@ export const VehicleDetailPage: React.FC<VehicleDetailPageProps> = ({
         calibrationDate: eqCalibrationDate,
         nextCalibrationDate: eqNextCalibrationDate,
         notes: eqNotes.trim() || undefined,
-        fileName: eqSelectedFile?.name,
-        fileType: eqSelectedFile?.type,
-        fileSize: eqSelectedFile?.size,
-        fileUrl: eqSelectedFile?.dataUrl,
+        ...(eqSelectedFile ? {
+          fileName: eqSelectedFile.name,
+          fileType: eqSelectedFile.type,
+          fileSize: eqSelectedFile.size,
+          fileUrl: eqSelectedFile.dataUrl,
+          dataUrl: eqSelectedFile.dataUrl,
+        } : {}),
       });
       setEquipmentSuccess(`Equipamento "${eqDescription}" atualizado com sucesso!`);
     } else {
@@ -351,6 +358,7 @@ export const VehicleDetailPage: React.FC<VehicleDetailPageProps> = ({
         fileType: eqSelectedFile?.type,
         fileSize: eqSelectedFile?.size,
         fileUrl: eqSelectedFile?.dataUrl,
+        dataUrl: eqSelectedFile?.dataUrl,
         uploadedAt: eqSelectedFile ? new Date().toLocaleDateString('pt-BR') : undefined,
         uploadedBy: currentUser ? `${currentUser.name} (${currentUser.role})` : 'Administrador',
       });
@@ -803,7 +811,7 @@ export const VehicleDetailPage: React.FC<VehicleDetailPageProps> = ({
               </div>
               <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/80 text-center">
                 <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Documentos</span>
-                <span className="text-lg font-black text-slate-900 block mt-0.5">{allAttachments.length}</span>
+                <span className="text-lg font-black text-slate-900 block mt-0.5">{registeredDocsCount}</span>
               </div>
               <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/80 text-center">
                 <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Total de OS</span>
@@ -876,9 +884,9 @@ export const VehicleDetailPage: React.FC<VehicleDetailPageProps> = ({
           >
             <FileCheck className="w-4 h-4" />
             <span>Documentos</span>
-            {allAttachments.length > 0 && (
+            {registeredDocsCount > 0 && (
               <span className="bg-slate-200 text-slate-700 text-[10px] font-black px-2 py-0.5 rounded-full">
-                {allAttachments.length}
+                {registeredDocsCount}
               </span>
             )}
           </button>
@@ -1545,114 +1553,135 @@ export const VehicleDetailPage: React.FC<VehicleDetailPageProps> = ({
 
             {/* Mandatory Docs List */}
             <div className="bg-white rounded-2xl border border-slate-200/90 p-5 space-y-3 shadow-2xs">
-              <h4 className="text-xs font-black uppercase tracking-wider text-slate-700">
-                Certificados de Registro Obrigatórios
-              </h4>
+              <div className="flex items-center justify-between">
+                <h4 className="text-xs font-black uppercase tracking-wider text-slate-700">
+                  Certificados de Registro Obrigatórios
+                </h4>
+                <span className="text-[11px] text-slate-400">
+                  Visualização e download de arquivos anexados
+                </span>
+              </div>
 
-              <div className="space-y-2">
+              <div className="space-y-2.5">
                 {docTypes.map(dtype => {
                   const doc = vehicle.documents[dtype];
-                  const isApplicable = !(dtype === 'Tacógrafo' && vehicle.type === 'Carreta');
+                  const hasFile = !!(doc?.fileUrl);
 
                   return (
                     <div 
                       key={dtype}
-                      className="p-3 bg-slate-50 rounded-xl border border-slate-200/80 flex items-center justify-between gap-3 flex-wrap"
+                      className={`p-3.5 rounded-xl border transition flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+                        hasFile 
+                          ? 'bg-emerald-50/40 border-emerald-200 shadow-2xs' 
+                          : 'bg-slate-50 border-slate-200/80'
+                      }`}
                     >
-                      <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 rounded-lg bg-slate-200 text-slate-700 flex items-center justify-center shrink-0">
-                          <FileText className="w-4 h-4" />
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
+                          hasFile ? 'bg-emerald-100 text-emerald-700 border border-emerald-200' : 'bg-slate-200 text-slate-700'
+                        }`}>
+                          {hasFile ? <FileCheck className="w-4 h-4 stroke-[2.5]" /> : <FileText className="w-4 h-4" />}
                         </div>
-                        <div>
-                          <span className="font-bold text-xs text-slate-900">{dtype}</span>
-                          <span className="text-[11px] text-slate-400 block">
-                            {doc?.expiryDate ? `Vencimento: ${doc.expiryDate}` : 'Não cadastrado'}
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-bold text-xs text-slate-900">{dtype}</span>
+                            {hasFile && (
+                              <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-md bg-emerald-100/90 text-emerald-800 border border-emerald-300">
+                                <FileCheck className="w-3 h-3 text-emerald-700 shrink-0" />
+                                <span className="truncate max-w-[200px]" title={doc.fileName || 'Arquivo Anexado'}>
+                                  {doc.fileName || 'Arquivo Anexado'}
+                                </span>
+                              </span>
+                            )}
+                            {doc?.number && (
+                              <span className="text-[10px] font-mono text-slate-600 bg-slate-200/70 px-1.5 py-0.5 rounded">
+                                Nº {doc.number}
+                              </span>
+                            )}
+                          </div>
+                          <span className="text-[11px] text-slate-500 block mt-0.5">
+                            {doc?.expiryDate 
+                              ? `Vencimento: ${formatDisplayDate(doc.expiryDate)}` 
+                              : hasFile 
+                              ? 'Documento digitalizado anexado à frota' 
+                              : 'Não cadastrado'}
                           </span>
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-2">
-                        {doc?.fileUrl && (
-                          <button
-                            onClick={() => setPreviewFile({
-                              name: doc.fileName || `${dtype}_Frota_${vehicle.fleetNumber}`,
-                              dataUrl: doc.fileUrl!,
-                              type: doc.fileType || 'application/pdf',
-                              title: `Documento Veicular: ${dtype}`
-                            })}
-                            className="p-1.5 text-[#ff5500] hover:bg-orange-50 rounded-lg"
-                            title="Visualizar documento"
-                          >
-                            <Eye className="w-4 h-4" />
-                          </button>
+                      <div className="flex items-center gap-2 shrink-0 flex-wrap justify-end">
+                        {hasFile && (
+                          <>
+                            <button
+                              onClick={() => setPreviewFile({
+                                name: doc.fileName || `${dtype}_Frota_${vehicle.fleetNumber}`,
+                                dataUrl: doc.fileUrl!,
+                                type: doc.fileType || 'application/pdf',
+                                title: `Documento Veicular: ${dtype}`
+                              })}
+                              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold text-[#ff5500] bg-orange-50 hover:bg-orange-100 transition cursor-pointer"
+                              title="Visualizar documento em tela cheia"
+                            >
+                              <Eye className="w-3.5 h-3.5" />
+                              <span>Visualizar</span>
+                            </button>
+
+                            <a
+                              href={doc.fileUrl}
+                              download={doc.fileName || `${dtype}_Frota_${vehicle.fleetNumber}.pdf`}
+                              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold text-slate-700 bg-white border border-slate-200 hover:bg-slate-100 transition cursor-pointer"
+                              title="Baixar arquivo do documento"
+                            >
+                              <Download className="w-3.5 h-3.5 text-slate-600" />
+                              <span>Baixar</span>
+                            </a>
+                          </>
                         )}
-                        <span className="text-xs font-bold text-slate-700 bg-white px-2.5 py-1 rounded-lg border border-slate-200">
-                          {doc?.status === 'valid' ? 'Válido' : doc?.status === 'expiring' ? 'A Vencer' : 'Pendente'}
+
+                        <span className={`text-xs font-bold px-2.5 py-1 rounded-lg border ${
+                          doc?.status === 'valid' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
+                          doc?.status === 'expiring' ? 'bg-amber-50 text-amber-700 border-amber-200' :
+                          doc?.status === 'expired' ? 'bg-rose-50 text-rose-700 border-rose-200' :
+                          hasFile ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
+                          'bg-white text-slate-500 border-slate-200'
+                        }`}>
+                          {doc?.status === 'valid' ? 'Válido' : 
+                           doc?.status === 'expiring' ? 'A Vencer' : 
+                           doc?.status === 'expired' ? 'Vencido' : 
+                           hasFile ? 'Anexado' : 'Pendente'}
                         </span>
-                        {isAdministrator && doc && (doc.expiryDate || doc.fileUrl) && (
-                          <button
-                            type="button"
-                            onClick={() => setDocToDelete({ docType: dtype, name: dtype })}
-                            className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition cursor-pointer"
-                            title={`Excluir registro do documento ${dtype}`}
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
+
+                        {isAdministrator && (
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setUploadCategory(dtype);
+                                setShowDocUploadForm(true);
+                              }}
+                              className="p-1.5 text-slate-500 hover:text-[#ff5500] hover:bg-orange-50 rounded-lg transition cursor-pointer"
+                              title={`Anexar / Atualizar arquivo do documento ${dtype}`}
+                            >
+                              <UploadCloud className="w-4 h-4" />
+                            </button>
+
+                            {doc && (doc.expiryDate || doc.fileUrl) && (
+                              <button
+                                type="button"
+                                onClick={() => setDocToDelete({ docType: dtype, name: dtype })}
+                                className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition cursor-pointer"
+                                title={`Excluir registro do documento ${dtype}`}
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            )}
+                          </div>
                         )}
                       </div>
                     </div>
                   );
                 })}
               </div>
-            </div>
-
-            {/* Attachments Grid */}
-            <div className="bg-white rounded-2xl border border-slate-200/90 p-5 space-y-3 shadow-2xs">
-              <h4 className="text-xs font-black uppercase tracking-wider text-slate-700">
-                Arquivos Anexados ({allAttachments.length})
-              </h4>
-
-              {allAttachments.length === 0 ? (
-                <p className="text-xs text-slate-400 italic">Nenhum arquivo digitalizado anexado.</p>
-              ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {allAttachments.map(att => (
-                    <div key={att.id} className="p-3 bg-slate-50 rounded-xl border border-slate-200 flex items-center justify-between gap-3">
-                      <div className="min-w-0 flex-1">
-                        <span className="text-xs font-bold text-slate-800 truncate block">{att.name}</span>
-                        <span className="text-[10px] text-slate-400 font-mono">{att.category} · {att.uploadedAt}</span>
-                      </div>
-
-                      <div className="flex items-center gap-1">
-                        <button
-                          onClick={() => setPreviewFile({
-                            name: att.name,
-                            dataUrl: att.dataUrl,
-                            type: att.fileType,
-                            title: att.name
-                          })}
-                          className="p-1.5 text-[#ff5500] hover:bg-orange-50 rounded-lg cursor-pointer"
-                        >
-                          <Eye className="w-4 h-4" />
-                        </button>
-                        <a href={att.dataUrl} download={att.name} className="p-1.5 text-slate-600 hover:bg-slate-200 rounded-lg">
-                          <Download className="w-4 h-4" />
-                        </a>
-                        {isAdministrator && (
-                          <button
-                            type="button"
-                            onClick={() => setAttachmentToDelete(att)}
-                            className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition cursor-pointer"
-                            title="Excluir arquivo anexado"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
             </div>
           </div>
         )}
