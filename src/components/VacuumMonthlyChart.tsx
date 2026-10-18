@@ -237,16 +237,10 @@ function generateVacuumChartCanvas(
     ctx.textAlign = 'center';
     ctx.fillText(`${item.value}`, xPos + barWidth / 2, yPos - 5);
 
-    // Fleet label under bar
+    // Only fleet number under bar
     ctx.fillStyle = '#1e293b';
     ctx.font = 'bold 11px Arial, sans-serif';
-    ctx.fillText(`Frota ${item.fleetNumber}`, xPos + barWidth / 2, chartBottom + 16);
-
-    // Plate and type under fleet
-    ctx.fillStyle = '#64748b';
-    ctx.font = '9px monospace';
-    const typeLabel = item.vehicle?.type === 'Caminhão' ? ' · Cam.' : '';
-    ctx.fillText(`${item.plate}${typeLabel}`, xPos + barWidth / 2, chartBottom + 29);
+    ctx.fillText(`${item.fleetNumber}`, xPos + barWidth / 2, chartBottom + 16);
 
     ctx.textAlign = 'left';
   });
@@ -758,7 +752,6 @@ export const VacuumMonthlyChart: React.FC<VacuumMonthlyChartProps> = ({
                     tickLine={false}
                     axisLine={{ stroke: '#cbd5e1' }}
                     tick={{ fill: '#334155', fontSize: 11, fontWeight: 700 }}
-                    tickFormatter={(val) => `Frota ${val}`}
                   />
                   
                   <YAxis 
