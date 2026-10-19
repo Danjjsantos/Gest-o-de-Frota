@@ -9,6 +9,7 @@ import {
   FileText,
   FileCheck,
   Gauge,
+  Fuel,
   Trash2
 } from 'lucide-react';
 import { useFleet, formatDisplayDate } from '../context/FleetContext';
@@ -36,8 +37,25 @@ export const FleetView: React.FC<FleetViewProps> = ({
   const [selectedOS, setSelectedOS] = useState<ServiceOrder | null>(null);
   const [vehicleToDelete, setVehicleToDelete] = useState<Vehicle | null>(null);
   const [search, setSearch] = useState('');
-  const [typeFilter, setTypeFilter] = useState<'Todos' | VehicleType>('Todos');
+  const [typeFilter, setTypeFilter] = useState<'Todos' | 'Gases do Ar' | 'CO2' | VehicleType>('Todos');
   const [exportSuccess, setExportSuccess] = useState(false);
+
+  // Helper to determine if vehicle carries Gases do Ar
+  const isGasesDoArVehicle = (v: Vehicle) => {
+    return Boolean(
+      (v.cargoProducts && v.cargoProducts.some(p => p.includes('Gases do Ar') || p.includes('LO2') || p.includes('LN2') || p.includes('LAR'))) ||
+      (v.cargoProduct && (v.cargoProduct.includes('Gases do Ar') || v.cargoProduct.includes('LO2') || v.cargoProduct.includes('LN2') || v.cargoProduct.includes('LAR')))
+    );
+  };
+
+  // Helper to determine if vehicle carries CO2
+  const isCO2Vehicle = (v: Vehicle) => {
+    if (isGasesDoArVehicle(v)) return false;
+    return Boolean(
+      (v.cargoProducts && v.cargoProducts.some(p => p.includes('CO2'))) ||
+      (v.cargoProduct && v.cargoProduct.includes('CO2'))
+    );
+  };
 
   // If a vehicle is selected, open the dedicated full page for that vehicle
   const activeVehicle = useMemo(() => {
@@ -47,7 +65,15 @@ export const FleetView: React.FC<FleetViewProps> = ({
 
   const filteredVehicles = useMemo(() => {
     return vehicles.filter(v => {
-      const matchesType = typeFilter === 'Todos' || v.type === typeFilter;
+      let matchesType = true;
+      if (typeFilter === 'Gases do Ar') {
+        matchesType = isGasesDoArVehicle(v);
+      } else if (typeFilter === 'CO2') {
+        matchesType = isCO2Vehicle(v);
+      } else if (typeFilter !== 'Todos') {
+        matchesType = v.type === typeFilter;
+      }
+
       const searchLower = search.toLowerCase().trim();
       if (!searchLower) return matchesType;
 
@@ -295,6 +321,302 @@ export const FleetView: React.FC<FleetViewProps> = ({
     );
   };
 
+  // Group vehicles in the requested presentation order:
+  // 1. Gases do Ar
+  // 2. CO2
+  // 3. Cavalo Mecânico (separar como os veículos são cadastrados)
+  // 4. Outras frotas (se houver)
+  const fleetSections = useMemo(() => {
+    const sortByFleet = (a: Vehicle, b: Vehicle) =>
+      a.fleetNumber.localeCompare(b.fleetNumber, undefined, { numeric: true });
+
+    if (typeFilter === 'Gases do Ar') {
+      const list = filteredVehicles.filter(isGasesDoArVehicle).sort(sortByFleet);
+      return [
+        {
+          id: 'gases-do-ar',
+          title: 'Gases do Ar',
+          subtitle: 'Frotas criogênicas (LO2, LN2, LAR) · Monitoramento de vácuo',
+          icon: <Gauge className="w-4 h-4 text-cyan-600" />,
+          badgeClass: 'bg-cyan-50 text-cyan-800 border-cyan-200',
+          vehicles: list,
+        }
+      ];
+    }
+
+    if (typeFilter === 'CO2') {
+      const list = filteredVehicles.filter(isCO2Vehicle).sort(sortByFleet);
+      return [
+        {
+          id: 'co2',
+          title: 'CO2',
+          subtitle: 'Frotas de dióxido de carbono líquido',
+          icon: <Fuel className="w-4 h-4 text-teal-600" />,
+          badgeClass: 'bg-teal-50 text-teal-800 border-teal-200',
+          vehicles: list,
+        }
+      ];
+    }
+
+    if (typeFilter === 'Cavalo Mecânico') {
+      const list = filteredVehicles.filter(v => v.type === 'Cavalo Mecânico').sort(sortByFleet);
+      return [
+        {
+          id: 'cavalo',
+          title: 'Cavalos Mecânicos',
+          subtitle: 'Unidades tratoras de tração mecânica pesada',
+          icon: <Truck className="w-4 h-4 text-emerald-600" />,
+          badgeClass: 'bg-emerald-50 text-emerald-800 border-emerald-200',
+          vehicles: list,
+        }
+      ];
+    }
+
+    if (typeFilter === 'Caminhão') {
+      const gasesDoArTrucks = filteredVehicles.filter(v => v.type === 'Caminhão' && isGasesDoArVehicle(v)).sort(sortByFleet);
+      const co2Trucks = filteredVehicles.filter(v => v.type === 'Caminhão' && isCO2Vehicle(v)).sort(sortByFleet);
+      const otherTrucks = filteredVehicles.filter(v => v.type === 'Caminhão' && !isGasesDoArVehicle(v) && !isCO2Vehicle(v)).sort(sortByFleet);
+
+      const sections = [];
+      if (gasesDoArTrucks.length > 0) {
+        sections.push({
+          id: 'caminhao-gases-do-ar',
+          title: 'Caminhões — Gases do Ar',
+          subtitle: 'Caminhões criogênicos (LO2, LN2, LAR)',
+          icon: <Gauge className="w-4 h-4 text-cyan-600" />,
+          badgeClass: 'bg-cyan-50 text-cyan-800 border-cyan-200',
+          vehicles: gasesDoArTrucks,
+        });
+      }
+      if (co2Trucks.length > 0) {
+        sections.push({
+          id: 'caminhao-co2',
+          title: 'Caminhões — CO2',
+          subtitle: 'Caminhões tanque de dióxido de carbono',
+          icon: <Fuel className="w-4 h-4 text-teal-600" />,
+          badgeClass: 'bg-teal-50 text-teal-800 border-teal-200',
+          vehicles: co2Trucks,
+        });
+      }
+      if (otherTrucks.length > 0) {
+        sections.push({
+          id: 'caminhao-outros',
+          title: 'Caminhões',
+          subtitle: 'Demais caminhões da frota',
+          icon: <Truck className="w-4 h-4 text-blue-600" />,
+          badgeClass: 'bg-blue-50 text-blue-800 border-blue-200',
+          vehicles: otherTrucks,
+        });
+      }
+      return sections;
+    }
+
+    if (typeFilter === 'Carreta') {
+      const gasesDoArTrailers = filteredVehicles.filter(v => v.type === 'Carreta' && isGasesDoArVehicle(v)).sort(sortByFleet);
+      const co2Trailers = filteredVehicles.filter(v => v.type === 'Carreta' && isCO2Vehicle(v)).sort(sortByFleet);
+      const otherTrailers = filteredVehicles.filter(v => v.type === 'Carreta' && !isGasesDoArVehicle(v) && !isCO2Vehicle(v)).sort(sortByFleet);
+
+      const sections = [];
+      if (gasesDoArTrailers.length > 0) {
+        sections.push({
+          id: 'carreta-gases-do-ar',
+          title: 'Carretas — Gases do Ar',
+          subtitle: 'Carretas criogênicas (LO2, LN2, LAR)',
+          icon: <Gauge className="w-4 h-4 text-cyan-600" />,
+          badgeClass: 'bg-cyan-50 text-cyan-800 border-cyan-200',
+          vehicles: gasesDoArTrailers,
+        });
+      }
+      if (co2Trailers.length > 0) {
+        sections.push({
+          id: 'carreta-co2',
+          title: 'Carretas — CO2',
+          subtitle: 'Carretas tanque de dióxido de carbono',
+          icon: <Fuel className="w-4 h-4 text-teal-600" />,
+          badgeClass: 'bg-teal-50 text-teal-800 border-teal-200',
+          vehicles: co2Trailers,
+        });
+      }
+      if (otherTrailers.length > 0) {
+        sections.push({
+          id: 'carreta-outras',
+          title: 'Carretas',
+          subtitle: 'Demais carretas da frota',
+          icon: <Truck className="w-4 h-4 text-purple-600" />,
+          badgeClass: 'bg-purple-50 text-purple-800 border-purple-200',
+          vehicles: otherTrailers,
+        });
+      }
+      return sections;
+    }
+
+    // Default 'Todos': strictly in the order requested:
+    // 1. Gases do Ar
+    // 2. CO2
+    // 3. Cavalo Mecânico
+    // 4. Outras frotas (se houver)
+    const gasesDoAr = filteredVehicles.filter(isGasesDoArVehicle).sort(sortByFleet);
+    const co2 = filteredVehicles.filter(isCO2Vehicle).sort(sortByFleet);
+    const cavalos = filteredVehicles.filter(v => v.type === 'Cavalo Mecânico').sort(sortByFleet);
+    const outros = filteredVehicles.filter(v => !isGasesDoArVehicle(v) && !isCO2Vehicle(v) && v.type !== 'Cavalo Mecânico').sort(sortByFleet);
+
+    const sections = [
+      {
+        id: 'gases-do-ar',
+        title: 'Gases do Ar',
+        subtitle: 'Frotas criogênicas (LO2, LN2, LAR) · Monitoramento de vácuo',
+        icon: <Gauge className="w-4 h-4 text-cyan-600" />,
+        badgeClass: 'bg-cyan-50 text-cyan-800 border-cyan-200',
+        vehicles: gasesDoAr,
+      },
+      {
+        id: 'co2',
+        title: 'CO2',
+        subtitle: 'Frotas de dióxido de carbono líquido',
+        icon: <Fuel className="w-4 h-4 text-teal-600" />,
+        badgeClass: 'bg-teal-50 text-teal-800 border-teal-200',
+        vehicles: co2,
+      },
+      {
+        id: 'cavalo',
+        title: 'Cavalos Mecânicos',
+        subtitle: 'Unidades tratoras de tração mecânica pesada',
+        icon: <Truck className="w-4 h-4 text-emerald-600" />,
+        badgeClass: 'bg-emerald-50 text-emerald-800 border-emerald-200',
+        vehicles: cavalos,
+      },
+    ];
+
+    if (outros.length > 0) {
+      sections.push({
+        id: 'outros',
+        title: 'Outras Frotas',
+        subtitle: 'Veículos cadastrados sem produto específico',
+        icon: <Truck className="w-4 h-4 text-slate-600" />,
+        badgeClass: 'bg-slate-50 text-slate-800 border-slate-200',
+        vehicles: outros,
+      });
+    }
+
+    return sections;
+  }, [filteredVehicles, typeFilter]);
+
+  const totalVisibleVehicles = useMemo(() => {
+    return fleetSections.reduce((acc, s) => acc + s.vehicles.length, 0);
+  }, [fleetSections]);
+
+  const renderVehicleCard = (vehicle: Vehicle) => (
+    <div
+      key={vehicle.id}
+      onClick={() => {
+        setSelectedVehicleId(vehicle.id);
+        if (onSelectVehicle) onSelectVehicle(vehicle);
+      }}
+      className="bg-white rounded-2xl border border-slate-200/90 shadow-2xs hover:shadow-md hover:border-orange-300 transition-all cursor-pointer p-4 sm:p-4.5 flex items-center justify-between group"
+    >
+      {/* Left section: icon/image + basic fleet info */}
+      <div className="flex items-center gap-3.5 min-w-0">
+        {getVehicleIconBox(vehicle)}
+
+        <div className="min-w-0">
+          {/* Line 1: Fleet number + Type pill + Active OS badge */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-base font-black text-slate-900 font-sans tracking-tight">
+              {vehicle.fleetNumber}
+            </span>
+            <span className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full ${
+              vehicle.type === 'Carreta' ? 'bg-purple-100 text-purple-700' :
+              vehicle.type === 'Cavalo Mecânico' ? 'bg-emerald-100 text-emerald-700' :
+              'bg-blue-100 text-blue-700'
+            }`}>
+              {vehicle.type}
+            </span>
+
+            {/* Informação dos Produtos Carregados (Gases do Ar / CO2) no Cabeçalho do Card */}
+            {((vehicle.type === 'Caminhão' || vehicle.type === 'Carreta') && ((vehicle.cargoProducts && vehicle.cargoProducts.length > 0) || vehicle.cargoProduct)) && (
+              <div className="flex items-center gap-1 flex-wrap">
+                {(vehicle.cargoProducts && vehicle.cargoProducts.length > 0
+                  ? vehicle.cargoProducts
+                  : (vehicle.cargoProduct ? [vehicle.cargoProduct as any] : [])
+                ).map((product: string) => {
+                  const isCO2 = product.includes('CO2');
+                  return (
+                    <span
+                      key={product}
+                      className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full border shadow-2xs ${
+                        isCO2
+                          ? 'bg-teal-50 text-teal-800 border-teal-200'
+                          : 'bg-cyan-50 text-cyan-800 border-cyan-200'
+                      }`}
+                      title={`Carga: ${product}`}
+                    >
+                      <span className={`w-1.5 h-1.5 rounded-full ${isCO2 ? 'bg-teal-500' : 'bg-cyan-500 animate-pulse'}`} />
+                      <span>{product}</span>
+                    </span>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Para frotas de Gases do Ar: exibir somente o valor e unidade de medida (ex: 12mtorr) */}
+            {((vehicle.cargoProducts?.includes('Gases do Ar (LO2, LN2, LAR)') || vehicle.cargoProduct?.includes('Gases do Ar')) && vehicle.vacuumValue != null && vehicle.vacuumValue !== '') && (
+              <span
+                className="inline-flex items-center gap-1 text-[10px] font-mono font-bold px-2 py-0.5 rounded-full border shadow-2xs bg-indigo-50 text-indigo-800 border-indigo-200"
+                title={`Vácuo medido: ${vehicle.vacuumValue}mtorr${vehicle.vacuumDate ? ` em ${formatDisplayDate(vehicle.vacuumDate)}` : ''}`}
+              >
+                <Gauge className="w-2.5 h-2.5 text-indigo-600 shrink-0" />
+                <span>{vehicle.vacuumValue}mtorr</span>
+              </span>
+            )}
+
+            {renderActiveOSBadges(vehicle)}
+          </div>
+
+          {/* Line 2: Modelo da frota abaixo do número da frota, em seguida a placa */}
+          <div className="text-xs text-slate-600 font-medium mt-0.5 truncate flex items-center flex-wrap">
+            <span className="font-bold text-slate-900">{vehicle.model}</span>
+            <span className="mx-1.5 text-slate-300 select-none">·</span>
+            <span className="font-mono font-bold text-slate-800">{vehicle.plate}/{vehicle.uf}</span>
+            {vehicle.brand && (
+              <>
+                <span className="mx-1.5 text-slate-300 select-none">·</span>
+                <span className="text-slate-600 uppercase text-[11px] font-medium">{vehicle.brand}</span>
+              </>
+            )}
+            {vehicle.year && (
+              <>
+                <span className="mx-1.5 text-slate-300 select-none">·</span>
+                <span>{vehicle.year}</span>
+              </>
+            )}
+          </div>
+
+          {/* Line 3: Document tags */}
+          {renderDocumentBadges(vehicle)}
+        </div>
+      </div>
+
+      {/* Right section: Admin delete button + Chevron arrow indicating clickable */}
+      <div className="flex items-center gap-1 shrink-0 ml-3">
+        {isAdmin && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setVehicleToDelete(vehicle);
+            }}
+            className="p-2 rounded-xl text-slate-300 hover:text-rose-600 hover:bg-rose-50 transition cursor-pointer"
+            title={`Excluir cadastro da Frota ${vehicle.fleetNumber}`}
+            aria-label="Excluir Frota"
+          >
+            <Trash2 className="w-4 h-4" />
+          </button>
+        )}
+        <ChevronRight className="w-5 h-5 text-slate-300 group-hover:text-[#ff5500] group-hover:translate-x-1 transition-all" />
+      </div>
+    </div>
+  );
+
   return (
     <div className="p-4 sm:p-8 space-y-6 max-w-6xl mx-auto">
       
@@ -353,7 +675,7 @@ export const FleetView: React.FC<FleetViewProps> = ({
 
         {/* Filter Pills */}
         <div className="flex items-center gap-1.5 overflow-x-auto pb-1 md:pb-0 shrink-0">
-          {(['Todos', 'Caminhão', 'Carreta', 'Cavalo Mecânico'] as const).map(tab => {
+          {(['Todos', 'Gases do Ar', 'CO2', 'Caminhão', 'Carreta', 'Cavalo Mecânico'] as const).map(tab => {
             const isActive = typeFilter === tab;
             return (
               <button
@@ -372,9 +694,9 @@ export const FleetView: React.FC<FleetViewProps> = ({
         </div>
       </div>
 
-      {/* Fleet Vehicles List Cards */}
-      <div className="space-y-3">
-        {filteredVehicles.length === 0 ? (
+      {/* Fleet Vehicles List Cards Separated by Category */}
+      <div className="space-y-8">
+        {totalVisibleVehicles === 0 ? (
           <div className="bg-white p-12 text-center rounded-2xl border border-slate-200 space-y-3">
             <Truck className="w-10 h-10 text-slate-300 mx-auto" />
             <p className="text-sm font-bold text-slate-700">
@@ -394,115 +716,35 @@ export const FleetView: React.FC<FleetViewProps> = ({
             </button>
           </div>
         ) : (
-          filteredVehicles.map(vehicle => {
+          fleetSections.map(section => {
+            if (section.vehicles.length === 0) return null;
+
             return (
-              <div
-                key={vehicle.id}
-                onClick={() => {
-                  setSelectedVehicleId(vehicle.id);
-                  if (onSelectVehicle) onSelectVehicle(vehicle);
-                }}
-                className="bg-white rounded-2xl border border-slate-200/90 shadow-2xs hover:shadow-md hover:border-orange-300 transition-all cursor-pointer p-4 sm:p-4.5 flex items-center justify-between group"
-              >
-                {/* Left section: icon/image + basic fleet info */}
-                <div className="flex items-center gap-3.5 min-w-0">
-                  {getVehicleIconBox(vehicle)}
-
-                  <div className="min-w-0">
-                    {/* Line 1: Fleet number + Type pill + Active OS badge */}
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-base font-black text-slate-900 font-sans tracking-tight">
-                        {vehicle.fleetNumber}
-                      </span>
-                      <span className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full ${
-                        vehicle.type === 'Carreta' ? 'bg-purple-100 text-purple-700' :
-                        vehicle.type === 'Cavalo Mecânico' ? 'bg-emerald-100 text-emerald-700' :
-                        'bg-blue-100 text-blue-700'
-                      }`}>
-                        {vehicle.type}
-                      </span>
-
-                      {/* Informação dos Produtos Carregados (Gases do Ar / CO2) no Cabeçalho do Card */}
-                      {((vehicle.type === 'Caminhão' || vehicle.type === 'Carreta') && ((vehicle.cargoProducts && vehicle.cargoProducts.length > 0) || vehicle.cargoProduct)) && (
-                        <div className="flex items-center gap-1 flex-wrap">
-                          {(vehicle.cargoProducts && vehicle.cargoProducts.length > 0
-                            ? vehicle.cargoProducts
-                            : (vehicle.cargoProduct ? [vehicle.cargoProduct as any] : [])
-                          ).map((product: string) => {
-                            const isCO2 = product.includes('CO2');
-                            return (
-                              <span
-                                key={product}
-                                className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full border shadow-2xs ${
-                                  isCO2
-                                    ? 'bg-teal-50 text-teal-800 border-teal-200'
-                                    : 'bg-cyan-50 text-cyan-800 border-cyan-200'
-                                }`}
-                                title={`Carga: ${product}`}
-                              >
-                                <span className={`w-1.5 h-1.5 rounded-full ${isCO2 ? 'bg-teal-500' : 'bg-cyan-500 animate-pulse'}`} />
-                                <span>{product}</span>
-                              </span>
-                            );
-                          })}
-                        </div>
-                      )}
-
-                      {/* Para frotas de Gases do Ar: exibir somente o valor e unidade de medida (ex: 12mtorr) */}
-                      {((vehicle.cargoProducts?.includes('Gases do Ar (LO2, LN2, LAR)') || vehicle.cargoProduct?.includes('Gases do Ar')) && vehicle.vacuumValue != null && vehicle.vacuumValue !== '') && (
-                        <span
-                          className="inline-flex items-center gap-1 text-[10px] font-mono font-bold px-2 py-0.5 rounded-full border shadow-2xs bg-indigo-50 text-indigo-800 border-indigo-200"
-                          title={`Vácuo medido: ${vehicle.vacuumValue}mtorr${vehicle.vacuumDate ? ` em ${formatDisplayDate(vehicle.vacuumDate)}` : ''}`}
-                        >
-                          <Gauge className="w-2.5 h-2.5 text-indigo-600 shrink-0" />
-                          <span>{vehicle.vacuumValue}mtorr</span>
-                        </span>
-                      )}
-
-                      {renderActiveOSBadges(vehicle)}
+              <div key={section.id} className="space-y-3">
+                {/* Section Header */}
+                <div className="flex items-center justify-between pb-2 border-b border-slate-200/90">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-7 h-7 rounded-lg bg-slate-100 flex items-center justify-center shrink-0">
+                      {section.icon}
                     </div>
-
-                    {/* Line 2: Modelo da frota abaixo do número da frota, em seguida a placa */}
-                    <div className="text-xs text-slate-600 font-medium mt-0.5 truncate flex items-center flex-wrap">
-                      <span className="font-bold text-slate-900">{vehicle.model}</span>
-                      <span className="mx-1.5 text-slate-300 select-none">·</span>
-                      <span className="font-mono font-bold text-slate-800">{vehicle.plate}/{vehicle.uf}</span>
-                      {vehicle.brand && (
-                        <>
-                          <span className="mx-1.5 text-slate-300 select-none">·</span>
-                          <span className="text-slate-600 uppercase text-[11px] font-medium">{vehicle.brand}</span>
-                        </>
-                      )}
-                      {vehicle.year && (
-                        <>
-                          <span className="mx-1.5 text-slate-300 select-none">·</span>
-                          <span>{vehicle.year}</span>
-                        </>
-                      )}
+                    <div>
+                      <h3 className="text-sm font-black text-slate-900 uppercase tracking-wide">
+                        {section.title}
+                      </h3>
+                      <p className="text-[11px] text-slate-500 font-medium hidden sm:block">
+                        {section.subtitle}
+                      </p>
                     </div>
-
-                    {/* Line 3: Document tags */}
-                    {renderDocumentBadges(vehicle)}
                   </div>
+
+                  <span className={`text-xs font-bold px-2.5 py-0.5 rounded-full border shadow-2xs ${section.badgeClass}`}>
+                    {section.vehicles.length} {section.vehicles.length === 1 ? 'frota' : 'frotas'}
+                  </span>
                 </div>
 
-                {/* Right section: Admin delete button + Chevron arrow indicating clickable */}
-                <div className="flex items-center gap-1 shrink-0 ml-3">
-                  {isAdmin && (
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setVehicleToDelete(vehicle);
-                      }}
-                      className="p-2 rounded-xl text-slate-300 hover:text-rose-600 hover:bg-rose-50 transition cursor-pointer"
-                      title={`Excluir cadastro da Frota ${vehicle.fleetNumber}`}
-                      aria-label="Excluir Frota"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  )}
-                  <ChevronRight className="w-5 h-5 text-slate-300 group-hover:text-[#ff5500] group-hover:translate-x-1 transition-all" />
+                {/* Section Cards List */}
+                <div className="space-y-3">
+                  {section.vehicles.map(renderVehicleCard)}
                 </div>
               </div>
             );
@@ -512,7 +754,7 @@ export const FleetView: React.FC<FleetViewProps> = ({
 
       {/* Footer counter */}
       <div className="flex items-center justify-between text-xs text-slate-400 px-1 pt-1">
-        <span>Exibindo {filteredVehicles.length} de {vehicles.length} frotas cadastradas</span>
+        <span>Exibindo {totalVisibleVehicles} de {vehicles.length} frotas cadastradas</span>
         <span className="hidden sm:inline">Clique no veículo para abrir a aba com informações completas e anexos</span>
       </div>
 
