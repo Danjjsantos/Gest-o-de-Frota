@@ -23,7 +23,8 @@ import {
   FileSpreadsheet,
   BarChart3,
   Gauge,
-  ChevronDown
+  ChevronDown,
+  Tag
 } from 'lucide-react';
 import { useFleet, getDaysDifference, formatDisplayDate } from '../context/FleetContext';
 import { Vehicle, DocumentType, OSCategory, ServiceOrder, getVacuumClassification } from '../types';
@@ -42,7 +43,8 @@ export const ReportView: React.FC = () => {
     serviceOrders, 
     users, 
     expiredDocumentsList, 
-    expiringDocumentsList 
+    expiringDocumentsList,
+    allEquipmentsList,
   } = useFleet();
 
   const [activeTab, setActiveTab] = useState<ReportTab>('dashboard');
@@ -619,6 +621,121 @@ export const ReportView: React.FC = () => {
                     <tr>
                       <td colSpan={7} className="py-6 text-center text-slate-400 text-xs">
                         Nenhuma carreta criogênica de Gases do Ar cadastrada.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* 6. Controle e Status dos Equipamentos Cadastrados (Calibração Metrológica) */}
+          <div className="space-y-3 pt-4 border-t border-slate-100">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <h3 className="text-xs font-black uppercase tracking-wider text-slate-900 flex items-center gap-2">
+                <Tag className="w-4 h-4 text-indigo-600" />
+                <span>6. Controle e Status dos Equipamentos Cadastrados (Calibração Metrológica)</span>
+              </h3>
+              <div className="flex items-center gap-3 text-xs flex-wrap">
+                <span className="text-slate-600 font-semibold">
+                  Total: <strong className="text-slate-900 font-mono">{allEquipmentsList.length}</strong>
+                </span>
+                <span className="text-emerald-700 font-bold font-mono">
+                  {stats.validEquipmentsCount} Em Dia
+                </span>
+                <span className="text-amber-700 font-bold font-mono">
+                  {stats.expiringEquipmentsCount} Vencendo (30d)
+                </span>
+                <span className="text-red-700 font-bold font-mono">
+                  {stats.expiredEquipmentsCount} Vencidos
+                </span>
+              </div>
+            </div>
+
+            <div className="overflow-x-auto rounded-xl border border-slate-200">
+              <table className="w-full text-left text-xs border-collapse">
+                <thead>
+                  <tr className="bg-slate-900 text-white text-[10px] uppercase font-bold tracking-wider">
+                    <th className="py-2.5 px-3">Frota</th>
+                    <th className="py-2.5 px-3">Placa/UF</th>
+                    <th className="py-2.5 px-3">Tipo</th>
+                    <th className="py-2.5 px-3">Equipamento / Instrumento</th>
+                    <th className="py-2.5 px-3">TAG</th>
+                    <th className="py-2.5 px-3">Certificado</th>
+                    <th className="py-2.5 px-3">Laboratório / Empresa</th>
+                    <th className="py-2.5 px-3 text-center">Última Calibração</th>
+                    <th className="py-2.5 px-3 text-center">Próx. Calibração</th>
+                    <th className="py-2.5 px-3">Situação / Prazo</th>
+                    <th className="py-2.5 px-3 text-center">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 bg-white font-sans">
+                  {allEquipmentsList.map(item => {
+                    const isExpired = item.status === 'expired';
+                    const isExpiring = item.status === 'expiring';
+                    return (
+                      <tr 
+                        key={`rpt-eq-${item.vehicle.id}-${item.equipment.id}`}
+                        className={`hover:bg-slate-50 ${
+                          isExpired ? 'bg-red-50/50' : isExpiring ? 'bg-amber-50/40' : ''
+                        }`}
+                      >
+                        <td className="py-2.5 px-3 font-mono font-bold text-slate-900">
+                          {item.vehicle.fleetNumber}
+                        </td>
+                        <td className="py-2.5 px-3 font-mono text-slate-700">
+                          {item.vehicle.plate}/{item.vehicle.uf}
+                        </td>
+                        <td className="py-2.5 px-3 text-slate-600">
+                          {item.vehicle.type}
+                        </td>
+                        <td className="py-2.5 px-3 font-medium text-slate-800">
+                          {item.equipment.description}
+                        </td>
+                        <td className="py-2.5 px-3 font-mono font-bold text-slate-800">
+                          <span className="px-1.5 py-0.5 rounded bg-slate-100 border border-slate-200 text-[10px]">
+                            {item.equipment.tag || 'S/TAG'}
+                          </span>
+                        </td>
+                        <td className="py-2.5 px-3 font-mono text-slate-700">
+                          {item.equipment.certificateNumber || '—'}
+                        </td>
+                        <td className="py-2.5 px-3 text-slate-600 truncate max-w-[160px]">
+                          {item.equipment.company || '—'}
+                        </td>
+                        <td className="py-2.5 px-3 text-center font-mono text-slate-600">
+                          {formatDisplayDate(item.equipment.calibrationDate) || '—'}
+                        </td>
+                        <td className="py-2.5 px-3 text-center font-mono font-bold text-slate-800">
+                          {formatDisplayDate(item.effectiveDate) || '—'}
+                        </td>
+                        <td className="py-2.5 px-3 whitespace-nowrap">
+                          {isExpired ? (
+                            <span className="text-red-700 font-bold">Vencido há {Math.abs(item.daysDiff)} dias</span>
+                          ) : isExpiring ? (
+                            <span className="text-amber-800 font-semibold">Vence em {item.daysDiff} dias</span>
+                          ) : (
+                            <span className="text-emerald-700">Válido por {item.daysDiff} dias</span>
+                          )}
+                        </td>
+                        <td className="py-2.5 px-3 text-center whitespace-nowrap">
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
+                            isExpired
+                              ? 'bg-red-100 text-red-800'
+                              : isExpiring
+                              ? 'bg-amber-100 text-amber-800'
+                              : 'bg-emerald-100 text-emerald-800'
+                          }`}>
+                            {isExpired ? 'Vencido' : isExpiring ? 'Vencendo' : 'Em Dia'}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {allEquipmentsList.length === 0 && (
+                    <tr>
+                      <td colSpan={11} className="py-6 text-center text-slate-400 text-xs">
+                        Nenhum equipamento cadastrado na frota.
                       </td>
                     </tr>
                   )}

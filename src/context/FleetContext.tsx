@@ -143,7 +143,21 @@ interface FleetContextType {
     activeDocsCount: number;
     totalDocsCount: number;
     activeDocsByType: Record<DocumentType, number>;
+    totalEquipmentsCount: number;
+    validEquipmentsCount: number;
+    expiringEquipmentsCount: number;
+    expiredEquipmentsCount: number;
   };
+
+  // Registered equipments across all vehicles with calculated status
+  allEquipmentsList: Array<{
+    id: string;
+    vehicle: Vehicle;
+    equipment: VehicleEquipment;
+    effectiveDate: string;
+    status: 'valid' | 'expiring' | 'expired';
+    daysDiff: number;
+  }>;
   
   // Document and Equipment Alert lists
   expiredDocumentsList: Array<{
@@ -326,6 +340,19 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         });
       }
     } catch {}
+
+    // Ensure all registered equipments from initial data are present if missing
+    rawList = rawList.map(v => {
+      const initV = INITIAL_VEHICLES.find(iv => iv.id === v.id || iv.fleetNumber === v.fleetNumber);
+      if (initV && initV.equipments && initV.equipments.length > 0) {
+        const currentIds = new Set((v.equipments || []).map(e => e.id));
+        const missing = initV.equipments.filter(e => !currentIds.has(e.id));
+        if (missing.length > 0) {
+          return { ...v, equipments: [...(v.equipments || []), ...missing] };
+        }
+      }
+      return v;
+    });
 
     return rawList.map(enrichVehicleCargoProducts);
   });
@@ -1808,6 +1835,49 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   };
 
+  // All registered equipments across all vehicles with calculated statuses
+  const allEquipmentsList = useMemo(() => {
+    const list: Array<{
+      id: string;
+      vehicle: Vehicle;
+      equipment: VehicleEquipment;
+      effectiveDate: string;
+      status: 'valid' | 'expiring' | 'expired';
+      daysDiff: number;
+    }> = [];
+
+    vehicles.forEach(vehicle => {
+      (vehicle.equipments || []).forEach(eq => {
+        const effectiveDate = eq.nextCalibrationDate || eq.calibrationDate || '';
+        const diffDays = effectiveDate ? getDaysDifference(effectiveDate) : 9999;
+        let status: 'valid' | 'expiring' | 'expired' = 'valid';
+        if (diffDays < 0) {
+          status = 'expired';
+        } else if (diffDays <= settings.daysThreshold) {
+          status = 'expiring';
+        } else {
+          status = 'valid';
+        }
+
+        list.push({
+          id: eq.id,
+          vehicle,
+          equipment: eq,
+          effectiveDate,
+          status,
+          daysDiff: diffDays,
+        });
+      });
+    });
+
+    return list;
+  }, [vehicles, settings.daysThreshold]);
+
+  const totalEquipmentsCount = allEquipmentsList.length;
+  const validEquipmentsCount = allEquipmentsList.filter(e => e.status === 'valid').length;
+  const expiringEquipmentsCount = allEquipmentsList.filter(e => e.status === 'expiring').length;
+  const expiredEquipmentsCount = allEquipmentsList.filter(e => e.status === 'expired').length;
+
   const stats = {
     totalVehicles: totalVehiclesCount,
     caminhaoCount: computedCaminhoes,
@@ -1821,6 +1891,10 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     activeDocsCount: totalActiveDocs,
     totalDocsCount: totalRegisteredDocs,
     activeDocsByType,
+    totalEquipmentsCount,
+    validEquipmentsCount,
+    expiringEquipmentsCount,
+    expiredEquipmentsCount,
   };
 
   return (
@@ -1862,6 +1936,7 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       activeBanner,
       dismissBanner,
       stats,
+      allEquipmentsList,
       expiredDocumentsList,
       expiringDocumentsList,
       criticalExpiringList,

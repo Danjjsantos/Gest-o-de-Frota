@@ -8,7 +8,8 @@ import {
   Tooltip, 
   ResponsiveContainer, 
   Cell, 
-  ReferenceLine 
+  ReferenceLine,
+  LabelList 
 } from 'recharts';
 import { 
   Gauge, 
@@ -244,6 +245,13 @@ function generateVacuumChartCanvas(
 
     ctx.textAlign = 'left';
   });
+
+  // X-Axis Title Label: Frotas
+  ctx.fillStyle = '#64748b';
+  ctx.font = '600 11px Arial, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('Frotas', chartX + chartW / 2, chartBottom + 34);
+  ctx.textAlign = 'left';
 
   // Footer notes
   ctx.fillStyle = '#94a3b8';
@@ -739,11 +747,11 @@ export const VacuumMonthlyChart: React.FC<VacuumMonthlyChartProps> = ({
               <span className="font-mono text-[11px]">{monthlyData.length} frotas aferidas</span>
             </div>
 
-            <div className="h-72 sm:h-80 w-full pt-4 pb-2">
+            <div className="h-76 sm:h-84 w-full pt-4 pb-2">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart
                   data={monthlyData}
-                  margin={{ top: 20, right: 20, left: -10, bottom: 25 }}
+                  margin={{ top: 28, right: 20, left: -10, bottom: 32 }}
                 >
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                   
@@ -752,6 +760,12 @@ export const VacuumMonthlyChart: React.FC<VacuumMonthlyChartProps> = ({
                     tickLine={false}
                     axisLine={{ stroke: '#cbd5e1' }}
                     tick={{ fill: '#334155', fontSize: 11, fontWeight: 700 }}
+                    label={{ 
+                      value: 'Frotas', 
+                      position: 'insideBottom', 
+                      offset: -12,
+                      style: { fill: '#64748b', fontSize: 11, fontWeight: 600 } 
+                    }}
                   />
                   
                   <YAxis 
@@ -849,6 +863,16 @@ export const VacuumMonthlyChart: React.FC<VacuumMonthlyChartProps> = ({
                     }}
                     cursor="pointer"
                   >
+                    <LabelList 
+                      dataKey="value" 
+                      position="top" 
+                      offset={8} 
+                      fill="#0f172a" 
+                      fontSize={11} 
+                      fontWeight={800} 
+                      fontFamily="monospace"
+                      formatter={(val: any) => `${val}`}
+                    />
                     {monthlyData.map((entry) => {
                       // Color mapping according to strict specification:
                       // <= 80: verde (#10b981)

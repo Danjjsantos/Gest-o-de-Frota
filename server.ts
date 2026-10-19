@@ -33,9 +33,23 @@ function getSupabaseKey(): string {
   ).trim();
 }
 
+function getPort(): number {
+  const portArgIndex = process.argv.indexOf('--port');
+  if (portArgIndex !== -1 && process.argv[portArgIndex + 1]) {
+    const p = Number(process.argv[portArgIndex + 1]);
+    if (!isNaN(p) && p > 0) return p;
+  }
+  // In Cloud Run / AI Studio, port 8080 is reserved for nginx/ingress. The dev server must run on 3000.
+  if (process.env.PORT && process.env.PORT !== '8080') {
+    const p = Number(process.env.PORT);
+    if (!isNaN(p) && p > 0) return p;
+  }
+  return 3000;
+}
+
 async function startServer() {
   const app = express();
-  const PORT = Number(process.env.PORT) || 3000;
+  const PORT = getPort();
 
   // Accept larger payloads for base64 attachments/documents
   app.use(express.json({ limit: '50mb' }));
@@ -251,8 +265,16 @@ async function startServer() {
     app.use(vite.middlewares);
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
+  const server = app.listen(PORT, '0.0.0.0', () => {
     console.log(`Gestão Frotas Server running on http://0.0.0.0:${PORT}`);
+  });
+
+  server.on('error', (err: any) => {
+    if (err.code === 'EADDRINUSE') {
+      console.error(`[Server Error] Port ${PORT} is already in use.`);
+    } else {
+      console.error('[Server Error]', err);
+    }
   });
 }
 

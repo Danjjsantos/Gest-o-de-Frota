@@ -345,7 +345,132 @@ export const generateDashboardPDF = (
   // @ts-ignore
   currentY = doc.lastAutoTable.finalY + 8;
 
-  // SECTION 6: Relação de Ordens de Serviço em Aberto / Em Andamento
+  // SECTION 6: Controle e Status dos Equipamentos Cadastrados (Calibração Metrológica)
+  if (currentY > 210) {
+    doc.addPage();
+    currentY = 16;
+  }
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(11);
+  doc.setTextColor(30, 41, 59);
+  doc.text('6. CONTROLE E STATUS DOS EQUIPAMENTOS CADASTRADOS (CALIBRAÇÃO METROLÓGICA)', 10, currentY);
+  currentY += 4;
+
+  // Extrair todos os equipamentos cadastrados na frota
+  const allEquipmentsList: Array<{
+    fleetNumber: string;
+    plateUf: string;
+    type: string;
+    description: string;
+    tag: string;
+    certificateNumber: string;
+    company: string;
+    calibrationDate: string;
+    nextCalibrationDate: string;
+    statusText: string;
+    statusCode: 'valid' | 'expiring' | 'expired';
+  }> = [];
+
+  const REFERENCE_DATE = new Date('2026-09-02T12:00:00Z');
+
+  vehicles.forEach(v => {
+    (v.equipments || []).forEach(eq => {
+      const targetDateStr = eq.nextCalibrationDate || eq.calibrationDate || '';
+      let diffDays = 9999;
+      if (targetDateStr) {
+        const target = new Date(targetDateStr.includes('T') ? targetDateStr : `${targetDateStr}T12:00:00Z`);
+        diffDays = Math.ceil((target.getTime() - REFERENCE_DATE.getTime()) / (1000 * 60 * 60 * 24));
+      }
+
+      let statusText = 'Válido / Em dia';
+      let statusCode: 'valid' | 'expiring' | 'expired' = 'valid';
+
+      if (diffDays < 0) {
+        statusText = `VENCIDO há ${Math.abs(diffDays)}d`;
+        statusCode = 'expired';
+      } else if (diffDays <= 30) {
+        statusText = `Vence em ${diffDays}d`;
+        statusCode = 'expiring';
+      } else {
+        statusText = `Em dia (${diffDays}d)`;
+        statusCode = 'valid';
+      }
+
+      allEquipmentsList.push({
+        fleetNumber: v.fleetNumber,
+        plateUf: `${v.plate}/${v.uf}`,
+        type: v.type,
+        description: eq.description,
+        tag: eq.tag || 'S/TAG',
+        certificateNumber: eq.certificateNumber || '—',
+        company: eq.company || '—',
+        calibrationDate: eq.calibrationDate ? formatDate(eq.calibrationDate) : '—',
+        nextCalibrationDate: targetDateStr ? formatDate(targetDateStr) : '—',
+        statusText,
+        statusCode,
+      });
+    });
+  });
+
+  const eqRows = allEquipmentsList.map(item => [
+    item.fleetNumber,
+    item.plateUf,
+    item.type,
+    item.description,
+    item.tag,
+    item.certificateNumber,
+    item.company,
+    item.calibrationDate,
+    item.nextCalibrationDate,
+    item.statusText,
+  ]);
+
+  if (eqRows.length === 0) {
+    eqRows.push(['—', '—', '—', 'Nenhum equipamento cadastrado na frota', '—', '—', '—', '—', '—', 'Sem registros']);
+  }
+
+  autoTable(doc, {
+    startY: currentY,
+    margin: { left: 10, right: 10 },
+    theme: 'grid',
+    styles: { fontSize: 7.2, cellPadding: 2.2, overflow: 'linebreak', valign: 'middle' },
+    headStyles: { fillColor: [49, 46, 129], textColor: [255, 255, 255], fontStyle: 'bold' },
+    head: [['Frota', 'Placa/UF', 'Tipo', 'Equipamento / Instrumento', 'TAG', 'Certificado', 'Laboratório / Fabricante', 'Calibração', 'Próx. Calib.', 'Situação']],
+    body: eqRows,
+    columnStyles: {
+      0: { cellWidth: 14, halign: 'center', fontStyle: 'bold' },
+      1: { cellWidth: 20, halign: 'center' },
+      2: { cellWidth: 18, halign: 'center' },
+      3: { cellWidth: 38, halign: 'left' },
+      4: { cellWidth: 20, halign: 'center', fontStyle: 'bold' },
+      5: { cellWidth: 22, halign: 'left' },
+      6: { cellWidth: 26, halign: 'left' },
+      7: { cellWidth: 15, halign: 'center' },
+      8: { cellWidth: 15, halign: 'center', fontStyle: 'bold' },
+      9: { cellWidth: 22, halign: 'center', fontStyle: 'bold' },
+    },
+    didParseCell: (data) => {
+      if (data.section === 'body' && data.column.index === 9) {
+        const text = String(data.cell.raw || '');
+        if (text.includes('VENCIDO')) {
+          data.cell.styles.textColor = [185, 28, 28]; // red-700
+          data.cell.styles.fontStyle = 'bold';
+        } else if (text.includes('Vence em')) {
+          data.cell.styles.textColor = [180, 83, 9]; // amber-700
+          data.cell.styles.fontStyle = 'bold';
+        } else if (text.includes('Em dia') || text.includes('Válido')) {
+          data.cell.styles.textColor = [5, 150, 105]; // emerald-600
+          data.cell.styles.fontStyle = 'bold';
+        }
+      }
+    }
+  });
+
+  // @ts-ignore
+  currentY = doc.lastAutoTable.finalY + 8;
+
+  // SECTION 7: Relação de Ordens de Serviço em Aberto / Em Andamento
   if (currentY > 215) {
     doc.addPage();
     currentY = 16;
@@ -354,7 +479,7 @@ export const generateDashboardPDF = (
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(11);
   doc.setTextColor(30, 41, 59);
-  doc.text('6. RELAÇÃO DE ORDENS DE SERVIÇO EM ABERTO E EM ANDAMENTO', 10, currentY);
+  doc.text('7. RELAÇÃO DE ORDENS DE SERVIÇO EM ABERTO E EM ANDAMENTO', 10, currentY);
   currentY += 4;
 
   const openOrders = serviceOrders.filter(os => os.status === 'Aberta' || os.status === 'Em andamento');

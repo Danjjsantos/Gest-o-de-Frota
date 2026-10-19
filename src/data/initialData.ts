@@ -250,7 +250,41 @@ export const INITIAL_VEHICLES: Vehicle[] = [
       CIPP: { type: 'CIPP', expiryDate: '2027-06-20', status: 'valid' },
       CIV: { type: 'CIV', expiryDate: '2026-09-22', status: 'expiring' }, // 🕒 CIV
       Tacógrafo: null,
-    }
+    },
+    equipments: [
+      {
+        id: 'eq-0198-1',
+        description: 'Manômetro Criogênico Escala Dupla (0-30 bar)',
+        company: 'Metrologia & Calibração Técnica RJ Ltda',
+        tag: 'TAG-MN-0198',
+        certificateNumber: 'CAL-2026/7740',
+        calibrationDate: '2026-05-20',
+        nextCalibrationDate: '2027-05-20',
+        status: 'valid',
+        notes: 'Escala 0-30 bar e 0-450 psi. Aferido com padrão RBC.',
+        fileName: 'Certificado_Manometro_0198.pdf',
+        fileType: 'application/pdf',
+        fileSize: 610000,
+        uploadedAt: '22/05/2026',
+        uploadedBy: 'Daniel Santos (Administrador)',
+      },
+      {
+        id: 'eq-0198-2',
+        description: 'Válvula de Segurança Criogênica 16 Bar',
+        company: 'Herose do Brasil Válvulas Criogênicas',
+        tag: 'TAG-VS-0198',
+        certificateNumber: 'INSP-2026/5120',
+        calibrationDate: '2025-09-18',
+        nextCalibrationDate: '2026-09-18',
+        status: 'expiring',
+        notes: 'Teste de estanqueidade e pressão de alívio em bancada.',
+        fileName: 'Laudo_Valvula_0198.pdf',
+        fileType: 'application/pdf',
+        fileSize: 420000,
+        uploadedAt: '20/09/2025',
+        uploadedBy: 'Daniel Santos (Administrador)',
+      }
+    ]
   },
   {
     id: 'veh-0379',
@@ -273,7 +307,25 @@ export const INITIAL_VEHICLES: Vehicle[] = [
       CIPP: { type: 'CIPP', expiryDate: '2027-08-10', status: 'valid' },
       CIV: { type: 'CIV', expiryDate: '2026-09-26', status: 'expiring' }, // 🕒 CIV
       Tacógrafo: null,
-    }
+    },
+    equipments: [
+      {
+        id: 'eq-0379-1',
+        description: 'Válvula Reguladora de Pressão CO2',
+        company: 'RegO Cryo-Flow do Brasil',
+        tag: 'TAG-VR-0379',
+        certificateNumber: 'CAL-2026/3310',
+        calibrationDate: '2025-11-05',
+        nextCalibrationDate: '2026-11-05',
+        status: 'expiring',
+        notes: 'Calibração anual para transporte rodoviário de dióxido de carbono.',
+        fileName: 'Certificado_Valvula_CO2.pdf',
+        fileType: 'application/pdf',
+        fileSize: 490000,
+        uploadedAt: '08/11/2025',
+        uploadedBy: 'Daniel Santos (Administrador)',
+      }
+    ]
   },
   {
     id: 'veh-0380',
@@ -296,7 +348,20 @@ export const INITIAL_VEHICLES: Vehicle[] = [
       CIPP: { type: 'CIPP', expiryDate: '2027-09-15', status: 'valid' },
       CIV: { type: 'CIV', expiryDate: '2026-09-28', status: 'expiring' }, // 🕒 CIV
       Tacógrafo: null,
-    }
+    },
+    equipments: [
+      {
+        id: 'eq-0380-1',
+        description: 'Manômetro de Descarga de CO2 (0-40 bar)',
+        company: 'Metrologia & Calibração Técnica RJ Ltda',
+        tag: 'TAG-MN-0380',
+        certificateNumber: 'CAL-2026/6671',
+        calibrationDate: '2026-02-10',
+        nextCalibrationDate: '2027-02-10',
+        status: 'valid',
+        notes: 'Calibração anual com certificado rastreável RBC.',
+      }
+    ]
   },
   {
     id: 'veh-9156',
@@ -322,7 +387,30 @@ export const INITIAL_VEHICLES: Vehicle[] = [
       CIPP: { type: 'CIPP', expiryDate: '2027-05-15', status: 'valid' },
       CIV: { type: 'CIV', expiryDate: '2027-05-15', status: 'valid' },
       Tacógrafo: null,
-    }
+    },
+    equipments: [
+      {
+        id: 'eq-9156-1',
+        description: 'Válvula de Segurança Principal (Tanque Criogênico)',
+        company: 'Herose do Brasil Válvulas Criogênicas',
+        tag: 'TAG-VS-9156',
+        certificateNumber: 'INSP-2025/3319',
+        calibrationDate: '2025-08-10',
+        nextCalibrationDate: '2026-08-10',
+        status: 'expired',
+        notes: 'Calibração vencida. Equipamento necessita de inspeção urgente.',
+      },
+      {
+        id: 'eq-9156-2',
+        description: 'Manômetro de Pressão de Trabalho (0-25 bar)',
+        company: 'WIKA do Brasil Indústria e Comércio Ltda',
+        tag: 'TAG-MN-9156',
+        certificateNumber: 'CAL-2026/4109',
+        calibrationDate: '2026-04-10',
+        nextCalibrationDate: '2027-04-10',
+        status: 'valid',
+      }
+    ]
   },
   {
     id: 'veh-1362',
@@ -349,7 +437,19 @@ export const INITIAL_VEHICLES: Vehicle[] = [
       CIPP: { type: 'CIPP', expiryDate: '2027-09-30', status: 'valid' },
       CIV: { type: 'CIV', expiryDate: '2027-09-30', status: 'valid' },
       Tacógrafo: null,
-    }
+    },
+    equipments: [
+      {
+        id: 'eq-1362-1',
+        description: 'Transmissor Eletrônico de Nível Criogênico',
+        company: 'WIKA do Brasil Indústria e Comércio Ltda',
+        tag: 'TAG-TR-1362',
+        certificateNumber: 'CAL-2026/9214',
+        calibrationDate: '2026-03-25',
+        nextCalibrationDate: '2027-03-25',
+        status: 'valid',
+      }
+    ]
   },
   {
     id: 'veh-1181',
@@ -375,7 +475,20 @@ export const INITIAL_VEHICLES: Vehicle[] = [
       CIPP: { type: 'CIPP', expiryDate: '2027-07-20', status: 'valid' },
       CIV: { type: 'CIV', expiryDate: '2027-07-20', status: 'valid' },
       Tacógrafo: null,
-    }
+    },
+    equipments: [
+      {
+        id: 'eq-1181-1',
+        description: 'Manômetro Criogênico de Descarga',
+        company: 'Metrologia & Calibração Técnica RJ Ltda',
+        tag: 'TAG-MN-1181',
+        certificateNumber: 'CAL-2026/7033',
+        calibrationDate: '2025-09-25',
+        nextCalibrationDate: '2026-09-25',
+        status: 'expiring',
+        notes: 'Vencimento próximo em 23 dias. Requer reagendamento.',
+      }
+    ]
   },
   {
     id: 'veh-2554',
@@ -532,7 +645,41 @@ export const INITIAL_VEHICLES: Vehicle[] = [
       CIPP: { type: 'CIPP', expiryDate: '2025-08-31', status: 'expired' }, // Vencido há 387d
       CIV: { type: 'CIV', expiryDate: '2025-09-08', status: 'expired' },  // Vencido há 379d
       Tacógrafo: { type: 'Tacógrafo', expiryDate: '2025-07-20', status: 'expired' },
-    }
+    },
+    equipments: [
+      {
+        id: 'eq-0567-1',
+        description: 'Transmissor de Pressão Diferencial (Nível)',
+        company: 'WIKA do Brasil Indústria e Comércio Ltda',
+        tag: 'TAG-TP-0567',
+        certificateNumber: 'CAL-2026/1029',
+        calibrationDate: '2026-04-15',
+        nextCalibrationDate: '2027-04-15',
+        status: 'valid',
+        notes: 'Faixa calibrada: 0 a 1000 mmH2O.',
+        fileName: 'Certificado_Transmissor_Nivel.pdf',
+        fileType: 'application/pdf',
+        fileSize: 450000,
+        uploadedAt: '16/04/2026',
+        uploadedBy: 'Daniel Santos (Administrador)',
+      },
+      {
+        id: 'eq-0567-2',
+        description: 'Válvula de Alívio de Pressão Criogênica 3.0 Bar',
+        company: 'Herose do Brasil Válvulas Criogênicas',
+        tag: 'TAG-VA-0567',
+        certificateNumber: 'INSP-2025/9981',
+        calibrationDate: '2025-10-10',
+        nextCalibrationDate: '2026-10-10',
+        status: 'expired',
+        notes: 'Aferição de pressão de abertura e teste de estanqueidade.',
+        fileName: 'Laudo_Valvula_Alivio_Herose.pdf',
+        fileType: 'application/pdf',
+        fileSize: 520000,
+        uploadedAt: '12/10/2025',
+        uploadedBy: 'Daniel Santos (Administrador)',
+      }
+    ]
   },
   {
     id: 'veh-0498',
@@ -707,7 +854,29 @@ export const INITIAL_VEHICLES: Vehicle[] = [
       CIPP: { type: 'CIPP', expiryDate: '2027-09-20', status: 'valid' },
       CIV: { type: 'CIV', expiryDate: '2027-09-20', status: 'valid' },
       Tacógrafo: { type: 'Tacógrafo', expiryDate: '2027-06-11', status: 'valid' },
-    }
+    },
+    equipments: [
+      {
+        id: 'eq-0412-1',
+        description: 'Válvula de Segurança Criogênica 3.0 Bar (Caminhão)',
+        company: 'Herose do Brasil Válvulas Criogênicas',
+        tag: 'TAG-VS-0412',
+        certificateNumber: 'INSP-2025/8102',
+        calibrationDate: '2025-09-15',
+        nextCalibrationDate: '2026-09-15',
+        status: 'expiring',
+      },
+      {
+        id: 'eq-0412-2',
+        description: 'Manômetro de Linha Criogênica LO2/LN2',
+        company: 'WIKA do Brasil Indústria e Comércio Ltda',
+        tag: 'TAG-MN-0412',
+        certificateNumber: 'CAL-2026/8103',
+        calibrationDate: '2026-06-14',
+        nextCalibrationDate: '2027-06-14',
+        status: 'valid',
+      }
+    ]
   },
   {
     id: 'veh-0415',
@@ -754,7 +923,19 @@ export const INITIAL_VEHICLES: Vehicle[] = [
       CIPP: { type: 'CIPP', expiryDate: '2027-12-01', status: 'valid' },
       CIV: { type: 'CIV', expiryDate: '2027-12-01', status: 'valid' },
       Tacógrafo: { type: 'Tacógrafo', expiryDate: '2027-07-15', status: 'valid' },
-    }
+    },
+    equipments: [
+      {
+        id: 'eq-0418-1',
+        description: 'Manômetro de Distribuição Criogênica',
+        company: 'Metrologia & Calibração Técnica RJ Ltda',
+        tag: 'TAG-MN-0418',
+        certificateNumber: 'CAL-2026/5521',
+        calibrationDate: '2026-01-20',
+        nextCalibrationDate: '2027-01-20',
+        status: 'valid',
+      }
+    ]
   },
   {
     id: 'veh-0520',

@@ -20,6 +20,7 @@ import { useFleet } from '../context/FleetContext';
 import { OSCategory, ServiceOrder } from '../types';
 import { FleetHealthSection } from '../components/FleetHealthSection';
 import { VacuumMonthlyChart } from '../components/VacuumMonthlyChart';
+import { EquipmentsDashboardSection } from '../components/EquipmentsDashboardSection';
 import { PriorityBadge } from '../components/PriorityBadge';
 import { generateDashboardPDF } from '../utils/pdfGenerator';
 
@@ -233,7 +234,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               Docs. Vencendo
             </p>
             <p className="text-[10px] sm:text-xs font-medium text-slate-400">
-              Nos próximos 30 dias
+              Próx. 30 dias ({stats.expiringEquipmentsCount} equip.)
             </p>
           </div>
         </div>
@@ -254,7 +255,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               Docs. Vencidos
             </p>
             <p className="text-[10px] sm:text-xs font-medium text-slate-400">
-              Requer atenção imediata
+              Atenção ({stats.expiredEquipmentsCount} equip.)
             </p>
           </div>
         </div>
@@ -271,6 +272,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       <VacuumMonthlyChart
         vehicles={vehicles}
         onSelectVehicle={onNavigateToFleet}
+      />
+
+      {/* Quadro com os Números de Equipamentos e seus Status */}
+      <EquipmentsDashboardSection
+        onNavigateToFleet={onNavigateToFleet}
+        onNavigateToNotifications={onNavigateToNotifications}
       />
 
       {/* OS por Categoria & OS Recentes */}
