@@ -282,14 +282,14 @@ export function toFrontendUser(row: any): User {
 
 // Convert Document to vehicle_documents row
 export function toDatabaseVehicleDocument(vehicleId: string, docType: string, doc: any): Record<string, any> | null {
-  if (!doc || !doc.expiryDate) return null;
+  if (!doc || (!doc.expiryDate && !doc.fileUrl)) return null;
   return {
     id: `doc-${vehicleId}-${docType}`.toLowerCase().replace(/[^a-z0-9_-]/g, '-'),
     vehicle_id: vehicleId,
     doc_type: docType,
     number: doc.number || null,
     issue_date: parseDateToIso(doc.issueDate),
-    expiry_date: parseDateToIso(doc.expiryDate) || doc.expiryDate,
+    expiry_date: parseDateToIso(doc.expiryDate) || doc.expiryDate || null,
     status: doc.status || 'valid',
     file_url: doc.fileUrl || null,
     file_name: doc.fileName || null,
@@ -557,71 +557,122 @@ export class SupabaseService {
         const docsObj: any = { ...(v.documents || {}) };
         vehDocs.forEach((d: any) => {
           if (d.doc_type) {
+            const existing = docsObj[d.doc_type] || {};
             docsObj[d.doc_type] = {
+              ...existing,
               type: d.doc_type,
-              number: d.number || undefined,
-              issueDate: d.issue_date || undefined,
-              expiryDate: d.expiry_date || '',
-              status: d.status || 'valid',
-              fileUrl: d.file_url || undefined,
-              fileName: d.file_name || undefined,
-              fileType: d.file_type || undefined,
-              fileSize: d.file_size || undefined,
-              notes: d.notes || undefined,
-              uploadedAt: d.uploaded_at ? formatIsoToBrDate(d.uploaded_at) : undefined
+              number: d.number || existing.number || undefined,
+              issueDate: d.issue_date || existing.issueDate || undefined,
+              expiryDate: d.expiry_date || existing.expiryDate || '',
+              status: d.status || existing.status || 'valid',
+              fileUrl: d.file_url || existing.fileUrl || undefined,
+              fileName: d.file_name || existing.fileName || undefined,
+              fileType: d.file_type || existing.fileType || undefined,
+              fileSize: d.file_size || existing.fileSize || undefined,
+              notes: d.notes || existing.notes || undefined,
+              uploadedAt: d.uploaded_at ? formatIsoToBrDate(d.uploaded_at) : (existing.uploadedAt || undefined)
             };
           }
         });
         v.documents = docsObj;
       }
 
-      // Mesclar anexos da tabela vehicle_attachments
+      // Mesclar anexos da tabela vehicle_attachments garantindo que dataUrl com conteúdo prevaleça
       const vehAtts = allVehAtts.filter((a: any) => a.vehicle_id === v.id);
       if (vehAtts.length > 0) {
-        const existingIds = new Set((v.attachments || []).map(a => a.id));
-        const extraAtts = vehAtts
-          .filter((a: any) => !existingIds.has(a.id))
-          .map((a: any) => ({
-            id: a.id,
-            name: a.name,
-            dataUrl: a.data_url,
-            fileType: a.file_type,
-            fileSize: a.file_size || 0,
-            category: a.category || 'Outro',
-            number: a.number || undefined,
-            issueDate: a.issue_date || undefined,
-            expiryDate: a.expiry_date || undefined,
-            notes: a.notes || undefined,
-            uploadedBy: a.uploaded_by || 'Sistema',
-            uploadedAt: a.uploaded_at ? formatIsoToBrDate(a.uploaded_at) : '15/07/2026'
-          }));
-        v.attachments = [...(v.attachments || []), ...extraAtts];
+        const tableAttMap = new Map<string, any>(
+          vehAtts.map((a: any) => [
+            a.id,
+            {
+              id: a.id,
+              name: a.name,
+              dataUrl: a.data_url || '',
+              fileType: a.file_type || 'application/pdf',
+              fileSize: a.file_size || 0,
+              category: a.category || 'Outro',
+              number: a.number || undefined,
+              issueDate: a.issue_date || undefined,
+              expiryDate: a.expiry_date || undefined,
+              notes: a.notes || undefined,
+              uploadedBy: a.uploaded_by || 'Sistema',
+              uploadedAt: a.uploaded_at ? formatIsoToBrDate(a.uploaded_at) : '15/07/2026'
+            }
+          ])
+        );
+
+        const mergedAtts: any[] = [];
+        const seenAttIds = new Set<string>();
+
+        (v.attachments || []).forEach(existingAtt => {
+          const tableAtt = tableAttMap.get(existingAtt.id);
+          mergedAtts.push({
+            ...existingAtt,
+            ...(tableAtt || {}),
+            dataUrl: (tableAtt?.dataUrl && tableAtt.dataUrl.length > 0) 
+              ? tableAtt.dataUrl 
+              : (existingAtt.dataUrl || ''),
+          });
+          seenAttIds.add(existingAtt.id);
+        });
+
+        tableAttMap.forEach((tableAtt, id) => {
+          if (!seenAttIds.has(id)) {
+            mergedAtts.push(tableAtt);
+            seenAttIds.add(id);
+          }
+        });
+
+        v.attachments = mergedAtts;
       }
 
       // Mesclar equipamentos da tabela vehicle_equipments
       const vehEqs = allEqs.filter((e: any) => e.vehicle_id === v.id);
       if (vehEqs.length > 0) {
-        const existingIds = new Set((v.equipments || []).map(e => e.id));
-        const extraEqs = vehEqs
-          .filter((e: any) => !existingIds.has(e.id))
-          .map((e: any) => ({
-            id: e.id,
-            description: e.description,
-            company: e.company || undefined,
-            tag: e.tag || undefined,
-            certificateNumber: e.certificate_number || undefined,
-            calibrationDate: e.calibration_date || undefined,
-            nextCalibrationDate: e.next_calibration_date,
-            status: e.status || 'valid',
-            notes: e.notes || undefined,
-            fileUrl: e.file_url || undefined,
-            fileName: e.file_name || undefined,
-            fileType: e.file_type || undefined,
-            fileSize: e.file_size || undefined,
-            uploadedBy: e.uploaded_by || 'Sistema',
-            uploadedAt: e.uploaded_at ? formatIsoToBrDate(e.uploaded_at) : undefined
-          }));
-        v.equipments = [...(v.equipments || []), ...extraEqs];
+        const tableEqMap = new Map<string, any>(
+          vehEqs.map((e: any) => [
+            e.id,
+            {
+              id: e.id,
+              description: e.description,
+              company: e.company || undefined,
+              tag: e.tag || undefined,
+              certificateNumber: e.certificate_number || undefined,
+              calibrationDate: e.calibration_date || undefined,
+              nextCalibrationDate: e.next_calibration_date,
+              status: e.status || 'valid',
+              notes: e.notes || undefined,
+              fileUrl: e.file_url || undefined,
+              fileName: e.file_name || undefined,
+              fileType: e.file_type || undefined,
+              fileSize: e.file_size || undefined,
+              uploadedBy: e.uploaded_by || 'Sistema',
+              uploadedAt: e.uploaded_at ? formatIsoToBrDate(e.uploaded_at) : undefined
+            }
+          ])
+        );
+
+        const mergedEqs: any[] = [];
+        const seenEqIds = new Set<string>();
+
+        (v.equipments || []).forEach(existingEq => {
+          const tableEq = tableEqMap.get(existingEq.id);
+          mergedEqs.push({
+            ...existingEq,
+            ...(tableEq || {}),
+            fileUrl: tableEq?.fileUrl || existingEq.fileUrl || undefined,
+            dataUrl: tableEq?.fileUrl || existingEq.dataUrl || undefined,
+          });
+          seenEqIds.add(existingEq.id);
+        });
+
+        tableEqMap.forEach((tableEq, id) => {
+          if (!seenEqIds.has(id)) {
+            mergedEqs.push(tableEq);
+            seenEqIds.add(id);
+          }
+        });
+
+        v.equipments = mergedEqs;
       }
 
       return v;
@@ -632,18 +683,43 @@ export class SupabaseService {
       const so = toFrontendServiceOrder(row);
       const osAtts = allSoAtts.filter((a: any) => a.service_order_id === so.id);
       if (osAtts.length > 0) {
-        const existingIds = new Set((so.attachments || []).map(a => a.id));
-        const extraAtts = osAtts
-          .filter((a: any) => !existingIds.has(a.id))
-          .map((a: any) => ({
-            id: a.id,
-            name: a.name,
-            dataUrl: a.data_url,
-            fileType: a.file_type,
-            fileSize: a.file_size || 0,
-            uploadedAt: a.uploaded_at ? formatIsoToBrDate(a.uploaded_at) : undefined
-          }));
-        so.attachments = [...(so.attachments || []), ...extraAtts];
+        const tableSoAttMap = new Map<string, any>(
+          osAtts.map((a: any) => [
+            a.id,
+            {
+              id: a.id,
+              name: a.name,
+              dataUrl: a.data_url || '',
+              fileType: a.file_type || 'image/jpeg',
+              fileSize: a.file_size || 0,
+              uploadedAt: a.uploaded_at ? formatIsoToBrDate(a.uploaded_at) : undefined
+            }
+          ])
+        );
+
+        const mergedSoAtts: any[] = [];
+        const seenSoIds = new Set<string>();
+
+        (so.attachments || []).forEach(existingAtt => {
+          const tableAtt = tableSoAttMap.get(existingAtt.id);
+          mergedSoAtts.push({
+            ...existingAtt,
+            ...(tableAtt || {}),
+            dataUrl: (tableAtt?.dataUrl && tableAtt.dataUrl.length > 0) 
+              ? tableAtt.dataUrl 
+              : (existingAtt.dataUrl || ''),
+          });
+          seenSoIds.add(existingAtt.id);
+        });
+
+        tableSoAttMap.forEach((tableAtt, id) => {
+          if (!seenSoIds.has(id)) {
+            mergedSoAtts.push(tableAtt);
+            seenSoIds.add(id);
+          }
+        });
+
+        so.attachments = mergedSoAtts;
       }
       return so;
     });
@@ -903,7 +979,7 @@ export class SupabaseService {
         if (v.documents) {
           const docRows: any[] = [];
           Object.entries(v.documents).forEach(([docType, doc]) => {
-            if (doc && (doc as any).expiryDate) {
+            if (doc && ((doc as any).expiryDate || (doc as any).fileUrl)) {
               const dRow = toDatabaseVehicleDocument(v.id, docType, doc);
               if (dRow) docRows.push(dRow);
             }
@@ -931,6 +1007,79 @@ export class SupabaseService {
       return true;
     } catch (err: any) {
       console.error('Erro ao salvar veículo no Supabase:', err.message);
+      return false;
+    }
+  }
+
+  /**
+   * Salvar anexo diretamente no Supabase na tabela vehicle_attachments e atualizar a frota
+   */
+  static async saveVehicleAttachment(vehicleId: string, att: any): Promise<boolean> {
+    const client = getSupabaseClient();
+    if (!client) return false;
+    try {
+      const attRow = toDatabaseVehicleAttachment(vehicleId, att);
+      const { error: attErr } = await client.from('vehicle_attachments').upsert(attRow, { onConflict: 'id' });
+      if (attErr) {
+        console.error('Erro ao salvar em vehicle_attachments:', attErr.message);
+      }
+
+      // Atualizar também o campo JSON attachments do veículo
+      const { data: vRow } = await client.from('vehicles').select('attachments').eq('id', vehicleId).single();
+      if (vRow) {
+        const existing: any[] = Array.isArray(vRow.attachments) ? vRow.attachments : [];
+        const filtered = existing.filter((a: any) => a.id !== att.id);
+        const updated = [att, ...filtered];
+        await client.from('vehicles').update({ attachments: updated, updated_at: new Date().toISOString() }).eq('id', vehicleId);
+      }
+      return true;
+    } catch (err: any) {
+      console.error('Erro ao salvar anexo de veículo no Supabase:', err.message);
+      return false;
+    }
+  }
+
+  /**
+   * Excluir anexo de veículo no Supabase
+   */
+  static async deleteVehicleAttachment(vehicleId: string, attachmentId: string): Promise<boolean> {
+    const client = getSupabaseClient();
+    if (!client) return false;
+    try {
+      await client.from('vehicle_attachments').delete().eq('id', attachmentId);
+      const { data: vRow } = await client.from('vehicles').select('attachments').eq('id', vehicleId).single();
+      if (vRow) {
+        const existing: any[] = Array.isArray(vRow.attachments) ? vRow.attachments : [];
+        const updated = existing.filter((a: any) => a.id !== attachmentId);
+        await client.from('vehicles').update({ attachments: updated, updated_at: new Date().toISOString() }).eq('id', vehicleId);
+      }
+      return true;
+    } catch (err: any) {
+      console.error('Erro ao excluir anexo de veículo:', err.message);
+      return false;
+    }
+  }
+
+  /**
+   * Salvar documento de veículo no Supabase imediatamente
+   */
+  static async saveVehicleDocument(vehicleId: string, docType: string, doc: any): Promise<boolean> {
+    const client = getSupabaseClient();
+    if (!client) return false;
+    try {
+      const docRow = toDatabaseVehicleDocument(vehicleId, docType, doc);
+      if (docRow) {
+        await client.from('vehicle_documents').upsert(docRow, { onConflict: 'id' });
+      }
+      const { data: vRow } = await client.from('vehicles').select('documents').eq('id', vehicleId).single();
+      if (vRow) {
+        const existingDocs = vRow.documents || {};
+        const updatedDocs = { ...existingDocs, [docType]: doc };
+        await client.from('vehicles').update({ documents: updatedDocs, updated_at: new Date().toISOString() }).eq('id', vehicleId);
+      }
+      return true;
+    } catch (err: any) {
+      console.error('Erro ao salvar documento no Supabase:', err.message);
       return false;
     }
   }

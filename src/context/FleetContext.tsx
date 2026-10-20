@@ -423,13 +423,13 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [activeBanner, setActiveBanner] = useState<ActiveAlertBanner | null>(null);
   const [isCriticalPopupOpen, setIsCriticalPopupOpen] = useState<boolean>(false);
   const hasTriggeredAlertForSessionRef = useRef<string | null>(null);
-
-
+  const isIdbLoadedRef = useRef<boolean>(false);
 
   // Asynchronously load full vehicles from IndexedDB to ensure equipments & files are never lost
   useEffect(() => {
     let isMounted = true;
     loadVehiclesFromIdb().then(idbVehicles => {
+      isIdbLoadedRef.current = true;
       if (isMounted && idbVehicles && idbVehicles.length > 0) {
         setVehicles(prev => {
           // Iterate over all prev vehicles and merge with IDB data
@@ -437,20 +437,66 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             const idbMatch = idbVehicles.find(iv => iv.id === local.id);
             if (!idbMatch) return local;
             const enriched = enrichVehicleCargoProducts(idbMatch);
+
+            // Merge equipments: prefer ones with files/data
             const currentEqIds = new Set((local.equipments || []).map(e => e.id));
             const extraEqs = (enriched.equipments || []).filter(ee => !currentEqIds.has(ee.id));
-            const mergedEqs = [...(local.equipments || []), ...extraEqs];
+            const mergedEqs = (local.equipments || []).map(le => {
+              const ie = (enriched.equipments || []).find(e => e.id === le.id);
+              return {
+                ...le,
+                fileUrl: le.fileUrl || ie?.fileUrl || undefined,
+                dataUrl: le.dataUrl || ie?.dataUrl || undefined,
+              };
+            });
 
-            const currentAttIds = new Set((local.attachments || []).map(a => a.id));
-            const extraAtts = (enriched.attachments || []).filter(ea => !currentAttIds.has(ea.id));
-            const mergedAtts = [...(local.attachments || []), ...extraAtts];
+            // Merge attachments: preserve dataUrl from IDB if local was stripped
+            const idbAttMap = new Map((enriched.attachments || []).map(a => [a.id, a]));
+            const localAtts = local.attachments || [];
+            const mergedAtts: VehicleAttachment[] = [];
+            const processedIds = new Set<string>();
+
+            localAtts.forEach(la => {
+              const idbAtt = idbAttMap.get(la.id);
+              mergedAtts.push({
+                ...la,
+                ...(idbAtt || {}),
+                dataUrl: (la.dataUrl && la.dataUrl.length > 0) 
+                  ? la.dataUrl 
+                  : (idbAtt?.dataUrl || ''),
+              });
+              processedIds.add(la.id);
+            });
+
+            (enriched.attachments || []).forEach(ia => {
+              if (!processedIds.has(ia.id)) {
+                mergedAtts.push(ia);
+                processedIds.add(ia.id);
+              }
+            });
+
+            // Ensure document fileUrls from IDB are preserved if local was stripped
+            const mergedDocs: any = { ...(enriched.documents || {}), ...(local.documents || {}) };
+            Object.keys(mergedDocs).forEach(dk => {
+              const idbDoc = (enriched.documents as any)?.[dk];
+              const localDoc = (local.documents as any)?.[dk];
+              if (idbDoc?.fileUrl && (!localDoc?.fileUrl || localDoc.fileUrl.length === 0)) {
+                mergedDocs[dk] = {
+                  ...mergedDocs[dk],
+                  fileUrl: idbDoc.fileUrl,
+                  fileName: mergedDocs[dk].fileName || idbDoc.fileName,
+                  fileType: mergedDocs[dk].fileType || idbDoc.fileType,
+                  fileSize: mergedDocs[dk].fileSize || idbDoc.fileSize,
+                };
+              }
+            });
 
             return {
               ...enriched,
               ...local,
-              documents: { ...(enriched.documents || {}), ...(local.documents || {}) },
+              documents: mergedDocs,
               attachments: mergedAtts,
-              equipments: mergedEqs,
+              equipments: [...mergedEqs, ...extraEqs],
             };
           });
 
@@ -474,7 +520,9 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   useEffect(() => {
     safeSaveVehiclesToLocalStorage(vehicles);
-    saveVehiclesToIdb(vehicles);
+    if (isIdbLoadedRef.current) {
+      saveVehiclesToIdb(vehicles);
+    }
   }, [vehicles]);
 
   useEffect(() => {
@@ -702,22 +750,70 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
               const remoteEqs = remoteV.equipments || [];
               const localEqs = localV.equipments || [];
-              const remoteEqIds = new Set(remoteEqs.map(e => e.id));
-              const missingLocalEqs = localEqs.filter(e => !remoteEqIds.has(e.id));
-              const mergedEquipments = [...remoteEqs, ...missingLocalEqs];
+              const localEqMap = new Map(localEqs.map(e => [e.id, e]));
+              const mergedEquipments: VehicleEquipment[] = remoteEqs.map(re => {
+                const le = localEqMap.get(re.id);
+                return {
+                  ...re,
+                  ...(le || {}),
+                  fileUrl: (le?.fileUrl && le.fileUrl.length > 0) ? le.fileUrl : (re.fileUrl || undefined),
+                  dataUrl: (le?.dataUrl && le.dataUrl.length > 0) ? le.dataUrl : (re.dataUrl || undefined),
+                };
+              });
+              const seenEqIds = new Set(remoteEqs.map(e => e.id));
+              localEqs.forEach(le => {
+                if (!seenEqIds.has(le.id)) {
+                  mergedEquipments.push(le);
+                  seenEqIds.add(le.id);
+                }
+              });
 
+              // Merge attachments: preserve non-empty dataUrl
               const remoteAtts = remoteV.attachments || [];
               const localAtts = localV.attachments || [];
-              const remoteAttIds = new Set(remoteAtts.map(a => a.id));
-              const missingLocalAtts = localAtts.filter(a => !remoteAttIds.has(a.id));
-              const mergedAttachments = [...remoteAtts, ...missingLocalAtts];
+              const localAttMap = new Map(localAtts.map(a => [a.id, a]));
+              const mergedAttachments: VehicleAttachment[] = [];
+              const seenAttIds = new Set<string>();
+
+              remoteAtts.forEach(ra => {
+                const la = localAttMap.get(ra.id);
+                mergedAttachments.push({
+                  ...ra,
+                  ...(la || {}),
+                  dataUrl: (la?.dataUrl && la.dataUrl.length > 0) ? la.dataUrl : (ra.dataUrl || ''),
+                });
+                seenAttIds.add(ra.id);
+              });
+
+              localAtts.forEach(la => {
+                if (!seenAttIds.has(la.id)) {
+                  mergedAttachments.push(la);
+                  seenAttIds.add(la.id);
+                }
+              });
+
+              // Also preserve document files (fileUrl)
+              const mergedDocs: any = {
+                ...(localV.documents || {}),
+                ...(remoteV.documents || {})
+              };
+              ['CRLV', 'CIV', 'CIPP', 'Tacógrafo'].forEach(dtype => {
+                const localDoc = (localV.documents as any)?.[dtype];
+                const remoteDoc = (remoteV.documents as any)?.[dtype];
+                if (localDoc?.fileUrl && (!remoteDoc?.fileUrl || remoteDoc.fileUrl.length === 0)) {
+                  mergedDocs[dtype] = {
+                    ...(mergedDocs[dtype] || {}),
+                    fileUrl: localDoc.fileUrl,
+                    fileName: localDoc.fileName || mergedDocs[dtype]?.fileName,
+                    fileType: localDoc.fileType || mergedDocs[dtype]?.fileType,
+                    fileSize: localDoc.fileSize || mergedDocs[dtype]?.fileSize,
+                  };
+                }
+              });
 
               return {
                 ...remoteV,
-                documents: {
-                  ...(localV.documents || {}),
-                  ...(remoteV.documents || {})
-                },
+                documents: mergedDocs,
                 attachments: mergedAttachments,
                 equipments: mergedEquipments,
               };
@@ -756,23 +852,69 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             if (localV) {
               const remoteEqs = veh.equipments || [];
               const localEqs = localV.equipments || [];
-              const remoteEqIds = new Set(remoteEqs.map(e => e.id));
-              const missingLocalEqs = localEqs.filter(e => !remoteEqIds.has(e.id));
-              const mergedEquipments = [...remoteEqs, ...missingLocalEqs];
+              const localEqMap = new Map(localEqs.map(e => [e.id, e]));
+              const mergedEquipments: VehicleEquipment[] = remoteEqs.map(re => {
+                const le = localEqMap.get(re.id);
+                return {
+                  ...re,
+                  ...(le || {}),
+                  fileUrl: (le?.fileUrl && le.fileUrl.length > 0) ? le.fileUrl : (re.fileUrl || undefined),
+                  dataUrl: (le?.dataUrl && le.dataUrl.length > 0) ? le.dataUrl : (re.dataUrl || undefined),
+                };
+              });
+              const seenEqIds = new Set(remoteEqs.map(e => e.id));
+              localEqs.forEach(le => {
+                if (!seenEqIds.has(le.id)) {
+                  mergedEquipments.push(le);
+                  seenEqIds.add(le.id);
+                }
+              });
 
               const remoteAtts = veh.attachments || [];
               const localAtts = localV.attachments || [];
-              const remoteAttIds = new Set(remoteAtts.map(a => a.id));
-              const missingLocalAtts = localAtts.filter(a => !remoteAttIds.has(a.id));
-              const mergedAttachments = [...remoteAtts, ...missingLocalAtts];
+              const localAttMap = new Map(localAtts.map(a => [a.id, a]));
+              const mergedAttachments: VehicleAttachment[] = [];
+              const seenAttIds = new Set<string>();
+
+              remoteAtts.forEach(ra => {
+                const la = localAttMap.get(ra.id);
+                mergedAttachments.push({
+                  ...ra,
+                  ...(la || {}),
+                  dataUrl: (la?.dataUrl && la.dataUrl.length > 0) ? la.dataUrl : (ra.dataUrl || ''),
+                });
+                seenAttIds.add(ra.id);
+              });
+
+              localAtts.forEach(la => {
+                if (!seenAttIds.has(la.id)) {
+                  mergedAttachments.push(la);
+                  seenAttIds.add(la.id);
+                }
+              });
+
+              const mergedDocs: any = {
+                ...(localV.documents || {}),
+                ...(veh.documents || {})
+              };
+              ['CRLV', 'CIV', 'CIPP', 'Tacógrafo'].forEach(dtype => {
+                const localDoc = (localV.documents as any)?.[dtype];
+                const remoteDoc = (veh.documents as any)?.[dtype];
+                if (localDoc?.fileUrl && (!remoteDoc?.fileUrl || remoteDoc.fileUrl.length === 0)) {
+                  mergedDocs[dtype] = {
+                    ...(mergedDocs[dtype] || {}),
+                    fileUrl: localDoc.fileUrl,
+                    fileName: localDoc.fileName || mergedDocs[dtype]?.fileName,
+                    fileType: localDoc.fileType || mergedDocs[dtype]?.fileType,
+                    fileSize: localDoc.fileSize || mergedDocs[dtype]?.fileSize,
+                  };
+                }
+              });
 
               const mergedVehicle: Vehicle = {
                 ...localV,
                 ...veh,
-                documents: {
-                  ...(localV.documents || {}),
-                  ...(veh.documents || {})
-                },
+                documents: mergedDocs,
                 attachments: mergedAttachments,
                 equipments: mergedEquipments,
               };
@@ -1050,10 +1192,15 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       notes?: string; 
     }
   ) => {
+    let createdAttachment: VehicleAttachment | null = null;
+    let savedDoc: any = null;
+
     setVehicles(prev => {
       const updated = prev.map(v => {
         if (v.id !== vehicleId) return v;
-        const targetDate = new Date(data.expiryDate);
+        const existingDoc = v.documents[docType];
+        const effectiveExpiry = data.expiryDate || existingDoc?.expiryDate || '';
+        const targetDate = new Date(effectiveExpiry);
         const diffDays = Math.ceil((targetDate.getTime() - REFERENCE_DATE.getTime()) / (1000 * 60 * 60 * 24));
         
         let status: 'valid' | 'expiring' | 'expired' = 'valid';
@@ -1063,27 +1210,29 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           status = 'expiring';
         }
 
-        const existingDoc = v.documents[docType];
+        const newDoc = {
+          type: docType,
+          expiryDate: effectiveExpiry,
+          number: data.number || existingDoc?.number,
+          notes: data.notes || existingDoc?.notes,
+          fileUrl: data.fileUrl || existingDoc?.fileUrl,
+          fileName: data.fileName || existingDoc?.fileName,
+          fileType: data.fileType || existingDoc?.fileType,
+          fileSize: data.fileSize || existingDoc?.fileSize,
+          uploadedAt: data.fileUrl ? new Date().toLocaleDateString('pt-BR') : existingDoc?.uploadedAt,
+          status,
+        };
+        savedDoc = newDoc;
+
         const updatedDocs = {
           ...v.documents,
-          [docType]: {
-            type: docType,
-            expiryDate: data.expiryDate,
-            number: data.number || existingDoc?.number,
-            notes: data.notes || existingDoc?.notes,
-            fileUrl: data.fileUrl || existingDoc?.fileUrl,
-            fileName: data.fileName || existingDoc?.fileName,
-            fileType: data.fileType || existingDoc?.fileType,
-            fileSize: data.fileSize || existingDoc?.fileSize,
-            uploadedAt: data.fileUrl ? new Date().toLocaleDateString('pt-BR') : existingDoc?.uploadedAt,
-            status,
-          }
+          [docType]: newDoc
         };
 
         // Also create/update an attachment entry if file was uploaded
         let updatedAttachments = v.attachments ? [...v.attachments] : [];
         if (data.fileUrl && data.fileName) {
-          const newAttachment: VehicleAttachment = {
+          createdAttachment = {
             id: `att-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
             name: data.fileName,
             dataUrl: data.fileUrl,
@@ -1096,34 +1245,55 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             uploadedAt: new Date().toLocaleDateString('pt-BR'),
             uploadedBy: currentUser ? `${currentUser.name} (${currentUser.role})` : 'Administrador',
           };
-          updatedAttachments = [newAttachment, ...updatedAttachments];
+          updatedAttachments = [createdAttachment, ...updatedAttachments];
         }
 
         return { ...v, documents: updatedDocs, attachments: updatedAttachments };
       });
+      safeSaveVehiclesToLocalStorage(updated);
+      saveVehiclesToIdb(updated);
       syncVehicleToSupabase(vehicleId, updated);
       return updated;
     });
+
+    if (createdAttachment) {
+      SupabaseService.saveVehicleAttachment(vehicleId, createdAttachment).catch(err => {
+        console.error('Error auto-syncing doc attachment to Supabase:', err);
+      });
+    }
+    if (savedDoc) {
+      SupabaseService.saveVehicleDocument(vehicleId, docType, savedDoc).catch(err => {
+        console.error('Error auto-syncing doc to Supabase:', err);
+      });
+    }
   };
 
   const addVehicleAttachment = (vehicleId: string, attachment: Omit<VehicleAttachment, 'id' | 'uploadedAt'>) => {
+    const newAtt: VehicleAttachment = {
+      ...attachment,
+      id: `att-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+      uploadedAt: new Date().toLocaleDateString('pt-BR'),
+      uploadedBy: attachment.uploadedBy || (currentUser ? `${currentUser.name} (${currentUser.role})` : 'Administrador'),
+    };
+
     setVehicles(prev => {
       const updated = prev.map(v => {
         if (v.id !== vehicleId) return v;
-        const newAtt: VehicleAttachment = {
-          ...attachment,
-          id: `att-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
-          uploadedAt: new Date().toLocaleDateString('pt-BR'),
-          uploadedBy: attachment.uploadedBy || (currentUser ? `${currentUser.name} (${currentUser.role})` : 'Administrador'),
-        };
         const existing = v.attachments || [];
         return {
           ...v,
           attachments: [newAtt, ...existing],
         };
       });
+      safeSaveVehiclesToLocalStorage(updated);
+      saveVehiclesToIdb(updated);
       syncVehicleToSupabase(vehicleId, updated);
       return updated;
+    });
+
+    // Auto-sync attachment immediately to Supabase
+    SupabaseService.saveVehicleAttachment(vehicleId, newAtt).catch(err => {
+      console.error('Error auto-saving attachment to Supabase:', err);
     });
   };
 
@@ -1136,8 +1306,14 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           attachments: (v.attachments || []).filter(a => a.id !== attachmentId),
         };
       });
+      safeSaveVehiclesToLocalStorage(updated);
+      saveVehiclesToIdb(updated);
       syncVehicleToSupabase(vehicleId, updated);
       return updated;
+    });
+
+    SupabaseService.deleteVehicleAttachment(vehicleId, attachmentId).catch(err => {
+      console.error('Error auto-deleting attachment from Supabase:', err);
     });
   };
 
@@ -1157,6 +1333,8 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           attachments: updatedAttachments,
         };
       });
+      safeSaveVehiclesToLocalStorage(updated);
+      saveVehiclesToIdb(updated);
       syncVehicleToSupabase(vehicleId, updated);
       return updated;
     });

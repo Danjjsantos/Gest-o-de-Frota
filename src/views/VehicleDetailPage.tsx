@@ -1717,6 +1717,166 @@ export const VehicleDetailPage: React.FC<VehicleDetailPageProps> = ({
                 })}
               </div>
             </div>
+
+            {/* Storage Attachments Section (PDFs and JPGs) */}
+            <div className="bg-white rounded-2xl border border-slate-200/90 p-5 space-y-3 shadow-2xs">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-slate-100">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <FileText className="w-4 h-4 text-[#ff5500]" />
+                  <h4 className="text-xs font-black uppercase tracking-wider text-slate-800">
+                    Arquivos e Anexos Digitalizados ({allAttachments.length})
+                  </h4>
+                  <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                    Sincronizado automaticamente com o Banco de Dados
+                  </span>
+                </div>
+                {isAdmin && (
+                  <button
+                    onClick={() => {
+                      setShowDocUploadForm(true);
+                      window.scrollTo({ top: 300, behavior: 'smooth' });
+                    }}
+                    className="text-xs font-bold text-[#ff5500] hover:text-[#e64d00] flex items-center gap-1 cursor-pointer self-start sm:self-auto"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Anexar Novo Arquivo</span>
+                  </button>
+                )}
+              </div>
+
+              {allAttachments.length === 0 ? (
+                <div className="p-8 text-center bg-slate-50/80 rounded-2xl border-2 border-dashed border-slate-200 space-y-2">
+                  <div className="w-10 h-10 rounded-full bg-slate-100 text-slate-400 flex items-center justify-center mx-auto">
+                    <FileText className="w-5 h-5" />
+                  </div>
+                  <p className="text-xs font-bold text-slate-700">
+                    Nenhum arquivo em PDF ou JPG anexado a esta frota
+                  </p>
+                  <p className="text-[11px] text-slate-400 max-w-sm mx-auto">
+                    {isAdmin 
+                      ? 'Clique no botão acima "Adicionar Documento" para enviar laudos, notas fiscais, fotos ou certificados. Os arquivos serão salvos permanentemente no banco de dados.' 
+                      : 'Quando adicionados por administradores, os arquivos digitalizados aparecem aqui para download e visualização.'}
+                  </p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                  {allAttachments.map((att: any) => {
+                    const isPdf = att.fileType === 'application/pdf' || att.name?.toLowerCase().endsWith('.pdf');
+                    return (
+                      <div 
+                        key={att.id}
+                        className="p-3.5 bg-white rounded-xl border border-slate-200 shadow-2xs hover:shadow-xs transition space-y-2.5 flex flex-col justify-between"
+                      >
+                        <div className="flex items-start gap-3">
+                          {isPdf ? (
+                            <div className="w-10 h-10 rounded-xl bg-rose-50 text-rose-600 border border-rose-100 flex items-center justify-center shrink-0">
+                              <FileText className="w-5 h-5" />
+                            </div>
+                          ) : (
+                            <div className="w-10 h-10 rounded-xl bg-orange-50 text-orange-600 border border-orange-100 flex items-center justify-center shrink-0 overflow-hidden">
+                              {att.dataUrl ? (
+                                <img 
+                                  src={att.dataUrl} 
+                                  alt={att.name}
+                                  className="w-full h-full object-cover" 
+                                />
+                              ) : (
+                                <ImageIcon className="w-5 h-5" />
+                              )}
+                            </div>
+                          )}
+
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-100 text-slate-700">
+                                {att.category || 'Anexo'}
+                              </span>
+                              {isPdf ? (
+                                <span className="text-[9px] font-black uppercase text-rose-700 bg-rose-50 px-1.5 py-0.2 rounded">
+                                  PDF
+                                </span>
+                              ) : (
+                                <span className="text-[9px] font-black uppercase text-orange-700 bg-orange-50 px-1.5 py-0.2 rounded">
+                                  JPG
+                                </span>
+                              )}
+                              {att.number && (
+                                <span className="text-[10px] font-mono text-slate-600 bg-slate-100 px-1.5 py-0.5 rounded">
+                                  Nº {att.number}
+                                </span>
+                              )}
+                            </div>
+
+                            <p className="text-xs font-bold text-slate-900 truncate mt-1" title={att.name}>
+                              {att.name}
+                            </p>
+
+                            <div className="text-[10px] text-slate-400 font-medium flex items-center gap-2 mt-0.5">
+                              {att.fileSize ? <span>{formatFileSize(att.fileSize)}</span> : null}
+                              {att.fileSize && att.uploadedAt ? <span>·</span> : null}
+                              <span>{att.uploadedAt}</span>
+                              {att.expiryDate && (
+                                <>
+                                  <span>·</span>
+                                  <span className="text-amber-600 font-semibold">Venc: {formatDisplayDate(att.expiryDate)}</span>
+                                </>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Attachment details & action buttons */}
+                        <div className="pt-2 border-t border-slate-100 flex items-center justify-between">
+                          <span className="text-[10px] text-slate-500 truncate max-w-[150px]" title={att.uploadedBy}>
+                            Por: {att.uploadedBy || 'Administrador'}
+                          </span>
+
+                          <div className="flex items-center gap-1">
+                            {att.dataUrl && (
+                              <button
+                                onClick={() => setPreviewFile({
+                                  name: att.name,
+                                  dataUrl: att.dataUrl,
+                                  type: att.fileType,
+                                  title: `Anexo da Frota: ${att.name}`
+                                })}
+                                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold text-[#ff5500] bg-orange-50 hover:bg-orange-100 transition cursor-pointer"
+                                title="Visualizar documento em tela cheia"
+                              >
+                                <Eye className="w-3.5 h-3.5" />
+                                <span>Visualizar</span>
+                              </button>
+                            )}
+
+                            {att.dataUrl && (
+                              <a
+                                href={att.dataUrl}
+                                download={att.name}
+                                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold text-slate-700 bg-white border border-slate-200 hover:bg-slate-100 transition cursor-pointer"
+                                title="Baixar arquivo original"
+                              >
+                                <Download className="w-3.5 h-3.5 text-slate-600" />
+                                <span>Baixar</span>
+                              </a>
+                            )}
+
+                            {isAdmin && (
+                              <button
+                                onClick={() => setAttachmentToDelete(att)}
+                                className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition cursor-pointer"
+                                title="Excluir anexo permanentemente"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
           </div>
         )}
 

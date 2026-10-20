@@ -30,9 +30,19 @@ export async function saveVehiclesToIdb(vehicles: any[]): Promise<void> {
     return new Promise((resolve, reject) => {
       const tx = db.transaction(STORE_NAME, 'readwrite');
       const store = tx.objectStore(STORE_NAME);
-      const req = store.put(vehicles, 'vehicles');
-      req.onsuccess = () => resolve();
-      req.onerror = () => reject(req.error);
+      store.put(vehicles, 'vehicles');
+
+      // Also save dedicated attachments map so attachments can never be lost
+      const attMap: Record<string, any[]> = {};
+      vehicles.forEach(v => {
+        if (Array.isArray(v.attachments) && v.attachments.length > 0) {
+          attMap[v.id] = v.attachments;
+        }
+      });
+      store.put(attMap, 'attachments_map');
+
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
     });
   } catch (err) {
     console.debug('IndexedDB saveVehicles notice:', err);
@@ -45,11 +55,51 @@ export async function loadVehiclesFromIdb(): Promise<any[] | null> {
     return new Promise((resolve) => {
       const tx = db.transaction(STORE_NAME, 'readonly');
       const store = tx.objectStore(STORE_NAME);
-      const req = store.get('vehicles');
-      req.onsuccess = () => {
-        resolve(Array.isArray(req.result) ? req.result : null);
+      const reqVehicles = store.get('vehicles');
+      const reqAtts = store.get('attachments_map');
+
+      tx.oncomplete = () => {
+        const vehicles = Array.isArray(reqVehicles.result) ? reqVehicles.result : null;
+        const attsMap = reqAtts.result || {};
+
+        if (!vehicles) {
+          resolve(null);
+          return;
+        }
+
+        // Merge attachments from attsMap if vehicle's attachments were missing or stripped
+        const enriched = vehicles.map(v => {
+          const backedUpAtts = attsMap[v.id];
+          if (backedUpAtts && Array.isArray(backedUpAtts) && backedUpAtts.length > 0) {
+            const merged: any[] = [];
+            const seen = new Set<string>();
+
+            (v.attachments || []).forEach((a: any) => {
+              const b = backedUpAtts.find((ba: any) => ba.id === a.id);
+              merged.push({
+                ...a,
+                ...(b || {}),
+                dataUrl: (a.dataUrl && a.dataUrl.length > 0) ? a.dataUrl : (b?.dataUrl || ''),
+              });
+              seen.add(a.id);
+            });
+
+            backedUpAtts.forEach((ba: any) => {
+              if (!seen.has(ba.id)) {
+                merged.push(ba);
+                seen.add(ba.id);
+              }
+            });
+
+            return { ...v, attachments: merged };
+          }
+          return v;
+        });
+
+        resolve(enriched);
       };
-      req.onerror = () => resolve(null);
+
+      tx.onerror = () => resolve(null);
     });
   } catch {
     return null;
