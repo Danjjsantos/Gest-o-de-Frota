@@ -24,6 +24,7 @@ import { VehicleDetailModal } from './components/modals/VehicleDetailModal';
 import { ServiceOrderDetailModal } from './components/modals/ServiceOrderDetailModal';
 import { CriticalExpirationsPopup } from './components/CriticalExpirationsPopup';
 import { SupabaseSyncModal } from './components/modals/SupabaseSyncModal';
+import { ErrorBoundary } from './components/ErrorBoundary';
 
 import { Vehicle, ServiceOrder, OSCategory } from './types';
 
@@ -129,48 +130,54 @@ function MainApp() {
       {/* Content Area */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden print:h-auto print:min-h-0 print:overflow-visible print:block">
         <main className="flex-1 overflow-y-auto custom-scrollbar bg-[#f8fafc] print:h-auto print:min-h-0 print:overflow-visible print:bg-white print:p-0 print:block">
-          {activeTab === 'dashboard' && (
-            <DashboardView
-              onNavigateToFleet={() => setActiveTab('frotas')}
-              onNavigateToOS={handleNavigateToOS}
-              onSelectOS={(os) => setSelectedOS(os)}
-              onNavigateToNotifications={() => setActiveTab('notificacoes')}
-              onOpenNewOS={() => setIsNewOSModalOpen(true)}
-            />
-          )}
+          <ErrorBoundary
+            fallbackTitle="Falha na exibição do módulo"
+            onReset={() => setActiveTab('dashboard')}
+            resetButtonText="Retornar ao Dashboard Principal"
+          >
+            {activeTab === 'dashboard' && (
+              <DashboardView
+                onNavigateToFleet={() => setActiveTab('frotas')}
+                onNavigateToOS={handleNavigateToOS}
+                onSelectOS={(os) => setSelectedOS(os)}
+                onNavigateToNotifications={() => setActiveTab('notificacoes')}
+                onOpenNewOS={() => setIsNewOSModalOpen(true)}
+              />
+            )}
 
-          {activeTab === 'frotas' && (
-            <FleetView
-              onOpenNewVehicleModal={() => setIsNewVehicleModalOpen(true)}
-              onOpenNewOSForVehicle={(vehicleId, lock) => {
-                setPreselectedVehicleId(vehicleId);
-                setLockVehicleSelection(!!lock);
-                setIsNewOSModalOpen(true);
-              }}
-            />
-          )}
+            {activeTab === 'frotas' && (
+              <FleetView
+                onOpenNewVehicleModal={() => setIsNewVehicleModalOpen(true)}
+                onOpenNewOSForVehicle={(vehicleId, lock) => {
+                  setPreselectedVehicleId(vehicleId);
+                  setLockVehicleSelection(!!lock);
+                  setIsNewOSModalOpen(true);
+                }}
+              />
+            )}
 
-          {activeTab === 'os' && (
-            <ServiceOrdersView
-              onOpenNewOS={() => setIsNewOSModalOpen(true)}
-              onSelectOS={(os) => setSelectedOS(os)}
-              initialCategory={osCategoryFilter}
-            />
-          )}
+            {activeTab === 'os' && (
+              <ServiceOrdersView
+                onOpenNewOS={() => setIsNewOSModalOpen(true)}
+                onSelectOS={(os) => setSelectedOS(os)}
+                initialCategory={osCategoryFilter}
+              />
+            )}
 
-          {activeTab === 'usuarios' && isFullAccessUser && (
-            <UsersView
-              onOpenNewUserModal={() => setIsNewUserModalOpen(true)}
-            />
-          )}
+            {activeTab === 'usuarios' && isFullAccessUser && (
+              <UsersView
+                onOpenNewUserModal={() => setIsNewUserModalOpen(true)}
+              />
+            )}
 
-          {activeTab === 'notificacoes' && isFullAccessUser && (
-            <NotificationsView onNavigateToFleet={() => setActiveTab('frotas')} />
-          )}
+            {activeTab === 'notificacoes' && isFullAccessUser && (
+              <NotificationsView onNavigateToFleet={() => setActiveTab('frotas')} />
+            )}
 
-          {activeTab === 'relatorio' && isFullAccessUser && (
-            <ReportView />
-          )}
+            {activeTab === 'relatorio' && isFullAccessUser && (
+              <ReportView />
+            )}
+          </ErrorBoundary>
         </main>
       </div>
 

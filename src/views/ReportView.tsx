@@ -432,7 +432,7 @@ export const ReportView: React.FC = () => {
                       <td className="py-2.5 px-3 text-slate-700">{item.vehicle.plate}/{item.vehicle.uf}</td>
                       <td className="py-2.5 px-3 font-sans text-slate-600">{item.vehicle.type}</td>
                       <td className="py-2.5 px-3 font-bold text-red-700">{item.docType}</td>
-                      <td className="py-2.5 px-3 text-slate-800">{item.expiryDate.split('-').reverse().join('/')}</td>
+                      <td className="py-2.5 px-3 text-slate-800">{item.expiryDate ? item.expiryDate.split('-').reverse().join('/') : '—'}</td>
                       <td className="py-2.5 px-3 font-sans font-bold text-red-700">Vencido há {item.daysDiff} dias</td>
                       <td className="py-2.5 px-3 text-center font-sans">
                         <span className="px-2 py-0.5 rounded-full bg-red-100 text-red-800 text-[10px] font-black uppercase">
@@ -448,7 +448,7 @@ export const ReportView: React.FC = () => {
                       <td className="py-2.5 px-3 text-slate-700">{item.vehicle.plate}/{item.vehicle.uf}</td>
                       <td className="py-2.5 px-3 font-sans text-slate-600">{item.vehicle.type}</td>
                       <td className="py-2.5 px-3 font-bold text-amber-800">{item.docType}</td>
-                      <td className="py-2.5 px-3 text-slate-800">{item.expiryDate.split('-').reverse().join('/')}</td>
+                      <td className="py-2.5 px-3 text-slate-800">{item.expiryDate ? item.expiryDate.split('-').reverse().join('/') : '—'}</td>
                       <td className="py-2.5 px-3 font-sans font-semibold text-amber-800">Vence em {item.daysRemaining} dias</td>
                       <td className="py-2.5 px-3 text-center font-sans">
                         <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 text-[10px] font-bold uppercase">
@@ -965,7 +965,7 @@ export const ReportView: React.FC = () => {
                             <td className="py-2.5 px-3 font-bold text-slate-900">{dtype}</td>
                             <td className="py-2.5 px-3 font-mono font-semibold text-slate-700">{doc.number || 'Registrado'}</td>
                             <td className="py-2.5 px-3 font-mono text-slate-600">{doc.issueDate ? doc.issueDate.split('-').reverse().join('/') : '—'}</td>
-                            <td className="py-2.5 px-3 font-mono font-bold text-slate-800">{doc.expiryDate.split('-').reverse().join('/')}</td>
+                            <td className="py-2.5 px-3 font-mono font-bold text-slate-800">{doc.expiryDate ? doc.expiryDate.split('-').reverse().join('/') : '—'}</td>
                             <td className="py-2.5 px-3 font-medium">
                               {diffDays < 0 ? (
                                 <span className="text-red-700 font-bold">Vencido há {Math.abs(diffDays)} dias</span>

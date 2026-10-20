@@ -23,10 +23,10 @@ import {
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { Vehicle, getVacuumClassification } from '../types';
-import { formatDisplayDate } from '../context/FleetContext';
+import { useFleet, formatDisplayDate } from '../context/FleetContext';
 
 interface VacuumMonthlyChartProps {
-  vehicles: Vehicle[];
+  vehicles?: Vehicle[];
   onSelectVehicle?: (vehicle: Vehicle) => void;
 }
 
@@ -262,9 +262,11 @@ function generateVacuumChartCanvas(
 }
 
 export const VacuumMonthlyChart: React.FC<VacuumMonthlyChartProps> = ({ 
-  vehicles,
+  vehicles: propVehicles,
   onSelectVehicle 
 }) => {
+  const { vehicles: contextVehicles } = useFleet();
+  const vehicles = propVehicles || contextVehicles || [];
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const [isExportingPhoto, setIsExportingPhoto] = useState(false);
   const [isExportingPdf, setIsExportingPdf] = useState(false);
@@ -751,7 +753,7 @@ export const VacuumMonthlyChart: React.FC<VacuumMonthlyChartProps> = ({
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart
                   data={monthlyData}
-                  margin={{ top: 28, right: 20, left: -10, bottom: 32 }}
+                  margin={{ top: 28, right: 20, left: 6, bottom: 34 }}
                 >
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                   
@@ -763,8 +765,8 @@ export const VacuumMonthlyChart: React.FC<VacuumMonthlyChartProps> = ({
                     label={{ 
                       value: 'Frotas', 
                       position: 'insideBottom', 
-                      offset: -12,
-                      style: { fill: '#64748b', fontSize: 11, fontWeight: 600 } 
+                      offset: -14,
+                      style: { fill: '#64748b', fontSize: 11, fontWeight: 600, textAnchor: 'middle' } 
                     }}
                   />
                   
@@ -777,8 +779,8 @@ export const VacuumMonthlyChart: React.FC<VacuumMonthlyChartProps> = ({
                       value: 'Vácuo (mtorr)', 
                       angle: -90, 
                       position: 'insideLeft', 
-                      offset: 15,
-                      style: { fill: '#64748b', fontSize: 11, fontWeight: 600 } 
+                      offset: 16,
+                      style: { fill: '#64748b', fontSize: 11, fontWeight: 600, textAnchor: 'middle' } 
                     }}
                   />
 

@@ -18,6 +18,7 @@ import { generateFullFleetReportPDF } from '../utils/pdfGenerator';
 import { VehicleDetailPage } from './VehicleDetailPage';
 import { ServiceOrderDetailModal } from '../components/modals/ServiceOrderDetailModal';
 import { ConfirmDeleteModal } from '../components/modals/ConfirmDeleteModal';
+import { ErrorBoundary } from '../components/ErrorBoundary';
 
 interface FleetViewProps {
   onOpenNewVehicleModal: () => void;
@@ -43,8 +44,8 @@ export const FleetView: React.FC<FleetViewProps> = ({
   // Helper to determine if vehicle carries Gases do Ar
   const isGasesDoArVehicle = (v: Vehicle) => {
     return Boolean(
-      (v.cargoProducts && v.cargoProducts.some(p => p.includes('Gases do Ar') || p.includes('LO2') || p.includes('LN2') || p.includes('LAR'))) ||
-      (v.cargoProduct && (v.cargoProduct.includes('Gases do Ar') || v.cargoProduct.includes('LO2') || v.cargoProduct.includes('LN2') || v.cargoProduct.includes('LAR')))
+      (Array.isArray(v.cargoProducts) && v.cargoProducts.some(p => typeof p === 'string' && (p.includes('Gases do Ar') || p.includes('LO2') || p.includes('LN2') || p.includes('LAR')))) ||
+      (typeof v.cargoProduct === 'string' && (v.cargoProduct.includes('Gases do Ar') || v.cargoProduct.includes('LO2') || v.cargoProduct.includes('LN2') || v.cargoProduct.includes('LAR')))
     );
   };
 
@@ -52,8 +53,8 @@ export const FleetView: React.FC<FleetViewProps> = ({
   const isCO2Vehicle = (v: Vehicle) => {
     if (isGasesDoArVehicle(v)) return false;
     return Boolean(
-      (v.cargoProducts && v.cargoProducts.some(p => p.includes('CO2'))) ||
-      (v.cargoProduct && v.cargoProduct.includes('CO2'))
+      (Array.isArray(v.cargoProducts) && v.cargoProducts.some(p => typeof p === 'string' && p.includes('CO2'))) ||
+      (typeof v.cargoProduct === 'string' && v.cargoProduct.includes('CO2'))
     );
   };
 
@@ -78,12 +79,12 @@ export const FleetView: React.FC<FleetViewProps> = ({
       if (!searchLower) return matchesType;
 
       const matchesSearch = 
-        v.fleetNumber.toLowerCase().includes(searchLower) ||
-        v.plate.toLowerCase().includes(searchLower) ||
-        v.model.toLowerCase().includes(searchLower) ||
-        v.brand.toLowerCase().includes(searchLower) ||
-        (v.cargoProduct && v.cargoProduct.toLowerCase().includes(searchLower)) ||
-        (v.cargoProducts && v.cargoProducts.some(p => p.toLowerCase().includes(searchLower))) ||
+        (v.fleetNumber || '').toLowerCase().includes(searchLower) ||
+        (v.plate || '').toLowerCase().includes(searchLower) ||
+        (v.model || '').toLowerCase().includes(searchLower) ||
+        (v.brand || '').toLowerCase().includes(searchLower) ||
+        (typeof v.cargoProduct === 'string' && v.cargoProduct.toLowerCase().includes(searchLower)) ||
+        (Array.isArray(v.cargoProducts) && v.cargoProducts.some(p => typeof p === 'string' && p.toLowerCase().includes(searchLower))) ||
         (v.renavam && v.renavam.toLowerCase().includes(searchLower)) ||
         (v.chassis && v.chassis.toLowerCase().includes(searchLower));
 
@@ -91,17 +92,207 @@ export const FleetView: React.FC<FleetViewProps> = ({
     });
   }, [vehicles, typeFilter, search]);
 
+  // Group vehicles in the requested presentation order:
+  // 1. Gases do Ar
+  // 2. CO2
+  // 3. Cavalo Mecânico (separar como os veículos são cadastrados)
+  // 4. Outras frotas (se houver)
+  const fleetSections = useMemo(() => {
+    const sortByFleet = (a: Vehicle, b: Vehicle) =>
+      a.fleetNumber.localeCompare(b.fleetNumber, undefined, { numeric: true });
+
+    if (typeFilter === 'Gases do Ar') {
+      const list = filteredVehicles.filter(isGasesDoArVehicle).sort(sortByFleet);
+      return [
+        {
+          id: 'gases-do-ar',
+          title: 'Gases do Ar',
+          subtitle: 'Frotas criogênicas (LO2, LN2, LAR) · Monitoramento de vácuo',
+          icon: <Gauge className="w-4 h-4 text-cyan-600" />,
+          badgeClass: 'bg-cyan-50 text-cyan-800 border-cyan-200',
+          vehicles: list,
+        }
+      ];
+    }
+
+    if (typeFilter === 'CO2') {
+      const list = filteredVehicles.filter(isCO2Vehicle).sort(sortByFleet);
+      return [
+        {
+          id: 'co2',
+          title: 'CO2',
+          subtitle: 'Frotas de dióxido de carbono líquido',
+          icon: <Fuel className="w-4 h-4 text-teal-600" />,
+          badgeClass: 'bg-teal-50 text-teal-800 border-teal-200',
+          vehicles: list,
+        }
+      ];
+    }
+
+    if (typeFilter === 'Cavalo Mecânico') {
+      const list = filteredVehicles.filter(v => v.type === 'Cavalo Mecânico').sort(sortByFleet);
+      return [
+        {
+          id: 'cavalo',
+          title: 'Cavalos Mecânicos',
+          subtitle: 'Unidades tratoras de tração mecânica pesada',
+          icon: <Truck className="w-4 h-4 text-emerald-600" />,
+          badgeClass: 'bg-emerald-50 text-emerald-800 border-emerald-200',
+          vehicles: list,
+        }
+      ];
+    }
+
+    if (typeFilter === 'Caminhão') {
+      const gasesDoArTrucks = filteredVehicles.filter(v => v.type === 'Caminhão' && isGasesDoArVehicle(v)).sort(sortByFleet);
+      const co2Trucks = filteredVehicles.filter(v => v.type === 'Caminhão' && isCO2Vehicle(v)).sort(sortByFleet);
+      const otherTrucks = filteredVehicles.filter(v => v.type === 'Caminhão' && !isGasesDoArVehicle(v) && !isCO2Vehicle(v)).sort(sortByFleet);
+
+      const sections = [];
+      if (gasesDoArTrucks.length > 0) {
+        sections.push({
+          id: 'caminhao-gases-do-ar',
+          title: 'Caminhões — Gases do Ar',
+          subtitle: 'Caminhões criogênicos (LO2, LN2, LAR)',
+          icon: <Gauge className="w-4 h-4 text-cyan-600" />,
+          badgeClass: 'bg-cyan-50 text-cyan-800 border-cyan-200',
+          vehicles: gasesDoArTrucks,
+        });
+      }
+      if (co2Trucks.length > 0) {
+        sections.push({
+          id: 'caminhao-co2',
+          title: 'Caminhões — CO2',
+          subtitle: 'Caminhões tanque de dióxido de carbono',
+          icon: <Fuel className="w-4 h-4 text-teal-600" />,
+          badgeClass: 'bg-teal-50 text-teal-800 border-teal-200',
+          vehicles: co2Trucks,
+        });
+      }
+      if (otherTrucks.length > 0) {
+        sections.push({
+          id: 'caminhao-outros',
+          title: 'Caminhões',
+          subtitle: 'Demais caminhões da frota',
+          icon: <Truck className="w-4 h-4 text-blue-600" />,
+          badgeClass: 'bg-blue-50 text-blue-800 border-blue-200',
+          vehicles: otherTrucks,
+        });
+      }
+      return sections;
+    }
+
+    if (typeFilter === 'Carreta') {
+      const gasesDoArTrailers = filteredVehicles.filter(v => v.type === 'Carreta' && isGasesDoArVehicle(v)).sort(sortByFleet);
+      const co2Trailers = filteredVehicles.filter(v => v.type === 'Carreta' && isCO2Vehicle(v)).sort(sortByFleet);
+      const otherTrailers = filteredVehicles.filter(v => v.type === 'Carreta' && !isGasesDoArVehicle(v) && !isCO2Vehicle(v)).sort(sortByFleet);
+
+      const sections = [];
+      if (gasesDoArTrailers.length > 0) {
+        sections.push({
+          id: 'carreta-gases-do-ar',
+          title: 'Carretas — Gases do Ar',
+          subtitle: 'Carretas criogênicas (LO2, LN2, LAR)',
+          icon: <Gauge className="w-4 h-4 text-cyan-600" />,
+          badgeClass: 'bg-cyan-50 text-cyan-800 border-cyan-200',
+          vehicles: gasesDoArTrailers,
+        });
+      }
+      if (co2Trailers.length > 0) {
+        sections.push({
+          id: 'carreta-co2',
+          title: 'Carretas — CO2',
+          subtitle: 'Carretas tanque de dióxido de carbono',
+          icon: <Fuel className="w-4 h-4 text-teal-600" />,
+          badgeClass: 'bg-teal-50 text-teal-800 border-teal-200',
+          vehicles: co2Trailers,
+        });
+      }
+      if (otherTrailers.length > 0) {
+        sections.push({
+          id: 'carreta-outras',
+          title: 'Carretas',
+          subtitle: 'Demais carretas da frota',
+          icon: <Truck className="w-4 h-4 text-purple-600" />,
+          badgeClass: 'bg-purple-50 text-purple-800 border-purple-200',
+          vehicles: otherTrailers,
+        });
+      }
+      return sections;
+    }
+
+    // Default 'Todos': strictly in the order requested:
+    // 1. Gases do Ar
+    // 2. CO2
+    // 3. Cavalo Mecânico
+    // 4. Outras frotas (se houver)
+    const gasesDoAr = filteredVehicles.filter(isGasesDoArVehicle).sort(sortByFleet);
+    const co2 = filteredVehicles.filter(isCO2Vehicle).sort(sortByFleet);
+    const cavalos = filteredVehicles.filter(v => v.type === 'Cavalo Mecânico').sort(sortByFleet);
+    const outros = filteredVehicles.filter(v => !isGasesDoArVehicle(v) && !isCO2Vehicle(v) && v.type !== 'Cavalo Mecânico').sort(sortByFleet);
+
+    const sections = [
+      {
+        id: 'gases-do-ar',
+        title: 'Gases do Ar',
+        subtitle: 'Frotas criogênicas (LO2, LN2, LAR) · Monitoramento de vácuo',
+        icon: <Gauge className="w-4 h-4 text-cyan-600" />,
+        badgeClass: 'bg-cyan-50 text-cyan-800 border-cyan-200',
+        vehicles: gasesDoAr,
+      },
+      {
+        id: 'co2',
+        title: 'CO2',
+        subtitle: 'Frotas de dióxido de carbono líquido',
+        icon: <Fuel className="w-4 h-4 text-teal-600" />,
+        badgeClass: 'bg-teal-50 text-teal-800 border-teal-200',
+        vehicles: co2,
+      },
+      {
+        id: 'cavalo',
+        title: 'Cavalos Mecânicos',
+        subtitle: 'Unidades tratoras de tração mecânica pesada',
+        icon: <Truck className="w-4 h-4 text-emerald-600" />,
+        badgeClass: 'bg-emerald-50 text-emerald-800 border-emerald-200',
+        vehicles: cavalos,
+      },
+    ];
+
+    if (outros.length > 0) {
+      sections.push({
+        id: 'outros',
+        title: 'Outras Frotas',
+        subtitle: 'Veículos cadastrados sem produto específico',
+        icon: <Truck className="w-4 h-4 text-slate-600" />,
+        badgeClass: 'bg-slate-50 text-slate-800 border-slate-200',
+        vehicles: outros,
+      });
+    }
+
+    return sections;
+  }, [filteredVehicles, typeFilter]);
+
+  const totalVisibleVehicles = useMemo(() => {
+    return fleetSections.reduce((acc, s) => acc + s.vehicles.length, 0);
+  }, [fleetSections]);
+
   if (activeVehicle) {
     return (
-      <VehicleDetailPage
-        vehicle={activeVehicle}
-        onBack={() => setSelectedVehicleId(null)}
-        onOpenNewOS={(vehicleId) => {
-          if (onOpenNewOSForVehicle) {
-            onOpenNewOSForVehicle(vehicleId, true);
-          }
-        }}
-      />
+      <ErrorBoundary
+        fallbackTitle={`Falha ao abrir detalhes da Frota ${activeVehicle.fleetNumber}`}
+        onReset={() => setSelectedVehicleId(null)}
+        resetButtonText="Voltar para a Listagem de Frotas"
+      >
+        <VehicleDetailPage
+          vehicle={activeVehicle}
+          onBack={() => setSelectedVehicleId(null)}
+          onOpenNewOS={(vehicleId) => {
+            if (onOpenNewOSForVehicle) {
+              onOpenNewOSForVehicle(vehicleId, true);
+            }
+          }}
+        />
+      </ErrorBoundary>
     );
   }
 
@@ -131,7 +322,7 @@ export const FleetView: React.FC<FleetViewProps> = ({
       : ['CRLV', 'CIPP', 'CIV', 'Tacógrafo'];
 
     docTypesToCheck.forEach(dtype => {
-      const doc = vehicle.documents[dtype];
+      const doc = vehicle.documents?.[dtype];
       if (!doc) {
         badges.push({
           type: dtype,
@@ -321,190 +512,6 @@ export const FleetView: React.FC<FleetViewProps> = ({
     );
   };
 
-  // Group vehicles in the requested presentation order:
-  // 1. Gases do Ar
-  // 2. CO2
-  // 3. Cavalo Mecânico (separar como os veículos são cadastrados)
-  // 4. Outras frotas (se houver)
-  const fleetSections = useMemo(() => {
-    const sortByFleet = (a: Vehicle, b: Vehicle) =>
-      a.fleetNumber.localeCompare(b.fleetNumber, undefined, { numeric: true });
-
-    if (typeFilter === 'Gases do Ar') {
-      const list = filteredVehicles.filter(isGasesDoArVehicle).sort(sortByFleet);
-      return [
-        {
-          id: 'gases-do-ar',
-          title: 'Gases do Ar',
-          subtitle: 'Frotas criogênicas (LO2, LN2, LAR) · Monitoramento de vácuo',
-          icon: <Gauge className="w-4 h-4 text-cyan-600" />,
-          badgeClass: 'bg-cyan-50 text-cyan-800 border-cyan-200',
-          vehicles: list,
-        }
-      ];
-    }
-
-    if (typeFilter === 'CO2') {
-      const list = filteredVehicles.filter(isCO2Vehicle).sort(sortByFleet);
-      return [
-        {
-          id: 'co2',
-          title: 'CO2',
-          subtitle: 'Frotas de dióxido de carbono líquido',
-          icon: <Fuel className="w-4 h-4 text-teal-600" />,
-          badgeClass: 'bg-teal-50 text-teal-800 border-teal-200',
-          vehicles: list,
-        }
-      ];
-    }
-
-    if (typeFilter === 'Cavalo Mecânico') {
-      const list = filteredVehicles.filter(v => v.type === 'Cavalo Mecânico').sort(sortByFleet);
-      return [
-        {
-          id: 'cavalo',
-          title: 'Cavalos Mecânicos',
-          subtitle: 'Unidades tratoras de tração mecânica pesada',
-          icon: <Truck className="w-4 h-4 text-emerald-600" />,
-          badgeClass: 'bg-emerald-50 text-emerald-800 border-emerald-200',
-          vehicles: list,
-        }
-      ];
-    }
-
-    if (typeFilter === 'Caminhão') {
-      const gasesDoArTrucks = filteredVehicles.filter(v => v.type === 'Caminhão' && isGasesDoArVehicle(v)).sort(sortByFleet);
-      const co2Trucks = filteredVehicles.filter(v => v.type === 'Caminhão' && isCO2Vehicle(v)).sort(sortByFleet);
-      const otherTrucks = filteredVehicles.filter(v => v.type === 'Caminhão' && !isGasesDoArVehicle(v) && !isCO2Vehicle(v)).sort(sortByFleet);
-
-      const sections = [];
-      if (gasesDoArTrucks.length > 0) {
-        sections.push({
-          id: 'caminhao-gases-do-ar',
-          title: 'Caminhões — Gases do Ar',
-          subtitle: 'Caminhões criogênicos (LO2, LN2, LAR)',
-          icon: <Gauge className="w-4 h-4 text-cyan-600" />,
-          badgeClass: 'bg-cyan-50 text-cyan-800 border-cyan-200',
-          vehicles: gasesDoArTrucks,
-        });
-      }
-      if (co2Trucks.length > 0) {
-        sections.push({
-          id: 'caminhao-co2',
-          title: 'Caminhões — CO2',
-          subtitle: 'Caminhões tanque de dióxido de carbono',
-          icon: <Fuel className="w-4 h-4 text-teal-600" />,
-          badgeClass: 'bg-teal-50 text-teal-800 border-teal-200',
-          vehicles: co2Trucks,
-        });
-      }
-      if (otherTrucks.length > 0) {
-        sections.push({
-          id: 'caminhao-outros',
-          title: 'Caminhões',
-          subtitle: 'Demais caminhões da frota',
-          icon: <Truck className="w-4 h-4 text-blue-600" />,
-          badgeClass: 'bg-blue-50 text-blue-800 border-blue-200',
-          vehicles: otherTrucks,
-        });
-      }
-      return sections;
-    }
-
-    if (typeFilter === 'Carreta') {
-      const gasesDoArTrailers = filteredVehicles.filter(v => v.type === 'Carreta' && isGasesDoArVehicle(v)).sort(sortByFleet);
-      const co2Trailers = filteredVehicles.filter(v => v.type === 'Carreta' && isCO2Vehicle(v)).sort(sortByFleet);
-      const otherTrailers = filteredVehicles.filter(v => v.type === 'Carreta' && !isGasesDoArVehicle(v) && !isCO2Vehicle(v)).sort(sortByFleet);
-
-      const sections = [];
-      if (gasesDoArTrailers.length > 0) {
-        sections.push({
-          id: 'carreta-gases-do-ar',
-          title: 'Carretas — Gases do Ar',
-          subtitle: 'Carretas criogênicas (LO2, LN2, LAR)',
-          icon: <Gauge className="w-4 h-4 text-cyan-600" />,
-          badgeClass: 'bg-cyan-50 text-cyan-800 border-cyan-200',
-          vehicles: gasesDoArTrailers,
-        });
-      }
-      if (co2Trailers.length > 0) {
-        sections.push({
-          id: 'carreta-co2',
-          title: 'Carretas — CO2',
-          subtitle: 'Carretas tanque de dióxido de carbono',
-          icon: <Fuel className="w-4 h-4 text-teal-600" />,
-          badgeClass: 'bg-teal-50 text-teal-800 border-teal-200',
-          vehicles: co2Trailers,
-        });
-      }
-      if (otherTrailers.length > 0) {
-        sections.push({
-          id: 'carreta-outras',
-          title: 'Carretas',
-          subtitle: 'Demais carretas da frota',
-          icon: <Truck className="w-4 h-4 text-purple-600" />,
-          badgeClass: 'bg-purple-50 text-purple-800 border-purple-200',
-          vehicles: otherTrailers,
-        });
-      }
-      return sections;
-    }
-
-    // Default 'Todos': strictly in the order requested:
-    // 1. Gases do Ar
-    // 2. CO2
-    // 3. Cavalo Mecânico
-    // 4. Outras frotas (se houver)
-    const gasesDoAr = filteredVehicles.filter(isGasesDoArVehicle).sort(sortByFleet);
-    const co2 = filteredVehicles.filter(isCO2Vehicle).sort(sortByFleet);
-    const cavalos = filteredVehicles.filter(v => v.type === 'Cavalo Mecânico').sort(sortByFleet);
-    const outros = filteredVehicles.filter(v => !isGasesDoArVehicle(v) && !isCO2Vehicle(v) && v.type !== 'Cavalo Mecânico').sort(sortByFleet);
-
-    const sections = [
-      {
-        id: 'gases-do-ar',
-        title: 'Gases do Ar',
-        subtitle: 'Frotas criogênicas (LO2, LN2, LAR) · Monitoramento de vácuo',
-        icon: <Gauge className="w-4 h-4 text-cyan-600" />,
-        badgeClass: 'bg-cyan-50 text-cyan-800 border-cyan-200',
-        vehicles: gasesDoAr,
-      },
-      {
-        id: 'co2',
-        title: 'CO2',
-        subtitle: 'Frotas de dióxido de carbono líquido',
-        icon: <Fuel className="w-4 h-4 text-teal-600" />,
-        badgeClass: 'bg-teal-50 text-teal-800 border-teal-200',
-        vehicles: co2,
-      },
-      {
-        id: 'cavalo',
-        title: 'Cavalos Mecânicos',
-        subtitle: 'Unidades tratoras de tração mecânica pesada',
-        icon: <Truck className="w-4 h-4 text-emerald-600" />,
-        badgeClass: 'bg-emerald-50 text-emerald-800 border-emerald-200',
-        vehicles: cavalos,
-      },
-    ];
-
-    if (outros.length > 0) {
-      sections.push({
-        id: 'outros',
-        title: 'Outras Frotas',
-        subtitle: 'Veículos cadastrados sem produto específico',
-        icon: <Truck className="w-4 h-4 text-slate-600" />,
-        badgeClass: 'bg-slate-50 text-slate-800 border-slate-200',
-        vehicles: outros,
-      });
-    }
-
-    return sections;
-  }, [filteredVehicles, typeFilter]);
-
-  const totalVisibleVehicles = useMemo(() => {
-    return fleetSections.reduce((acc, s) => acc + s.vehicles.length, 0);
-  }, [fleetSections]);
-
   const renderVehicleCard = (vehicle: Vehicle) => (
     <div
       key={vehicle.id}
@@ -533,12 +540,12 @@ export const FleetView: React.FC<FleetViewProps> = ({
             </span>
 
             {/* Informação dos Produtos Carregados (Gases do Ar / CO2) no Cabeçalho do Card */}
-            {((vehicle.type === 'Caminhão' || vehicle.type === 'Carreta') && ((vehicle.cargoProducts && vehicle.cargoProducts.length > 0) || vehicle.cargoProduct)) && (
+            {((vehicle.type === 'Caminhão' || vehicle.type === 'Carreta') && ((Array.isArray(vehicle.cargoProducts) && vehicle.cargoProducts.length > 0) || vehicle.cargoProduct)) && (
               <div className="flex items-center gap-1 flex-wrap">
-                {(vehicle.cargoProducts && vehicle.cargoProducts.length > 0
+                {(Array.isArray(vehicle.cargoProducts) && vehicle.cargoProducts.length > 0
                   ? vehicle.cargoProducts
                   : (vehicle.cargoProduct ? [vehicle.cargoProduct as any] : [])
-                ).map((product: string) => {
+                ).filter((p: any) => typeof p === 'string').map((product: string) => {
                   const isCO2 = product.includes('CO2');
                   return (
                     <span
@@ -559,7 +566,7 @@ export const FleetView: React.FC<FleetViewProps> = ({
             )}
 
             {/* Para frotas de Gases do Ar: exibir somente o valor e unidade de medida (ex: 12mtorr) */}
-            {((vehicle.cargoProducts?.includes('Gases do Ar (LO2, LN2, LAR)') || vehicle.cargoProduct?.includes('Gases do Ar')) && vehicle.vacuumValue != null && vehicle.vacuumValue !== '') && (
+            {(((Array.isArray(vehicle.cargoProducts) && vehicle.cargoProducts.some(p => typeof p === 'string' && p.includes('Gases do Ar'))) || (typeof vehicle.cargoProduct === 'string' && vehicle.cargoProduct.includes('Gases do Ar'))) && vehicle.vacuumValue != null && vehicle.vacuumValue !== '') && (
               <span
                 className="inline-flex items-center gap-1 text-[10px] font-mono font-bold px-2 py-0.5 rounded-full border shadow-2xs bg-indigo-50 text-indigo-800 border-indigo-200"
                 title={`Vácuo medido: ${vehicle.vacuumValue}mtorr${vehicle.vacuumDate ? ` em ${formatDisplayDate(vehicle.vacuumDate)}` : ''}`}

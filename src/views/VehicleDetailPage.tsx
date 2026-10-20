@@ -73,7 +73,7 @@ export const VehicleDetailPage: React.FC<VehicleDetailPageProps> = ({
 
   // Dynamically resolve vehicle from FleetContext state so any updates to equipments, documents, or attachments reflect instantly without needing a page refresh
   const vehicle = useMemo(() => {
-    return vehicles.find(v => v.id === propVehicle.id) || propVehicle;
+    return (propVehicle && vehicles.find(v => v.id === propVehicle.id)) || propVehicle;
   }, [vehicles, propVehicle]);
 
   const isAdministrator = currentUser?.role === 'Administrador';
@@ -195,24 +195,29 @@ export const VehicleDetailPage: React.FC<VehicleDetailPageProps> = ({
   const isAdmin = currentUser?.role === 'Administrador' || currentUser?.role === 'Gerente' || currentUser?.role === 'Encarregado';
 
   const handleExportPDF = () => {
-    generateVehicleDossierPDF(vehicle, serviceOrders, users);
-    setPdfSuccess(true);
-    setTimeout(() => setPdfSuccess(false), 3000);
+    if (vehicle) {
+      generateVehicleDossierPDF(vehicle, serviceOrders, users);
+      setPdfSuccess(true);
+      setTimeout(() => setPdfSuccess(false), 3000);
+    }
   };
 
-  const vehicleOrders = serviceOrders.filter(os => os.vehicleId === vehicle.id || os.fleetNumber === vehicle.fleetNumber);
+  const vehicleOrders = (serviceOrders || []).filter(
+    os => os && vehicle && (os.vehicleId === vehicle.id || os.fleetNumber === vehicle.fleetNumber)
+  );
   const activeVehicleOrders = useMemo(() => {
     return vehicleOrders.filter(
-      (os: ServiceOrder) => os.status === 'Aberta' || os.status === 'Em andamento' || os.status === 'Resolvida'
+      (os: ServiceOrder) => os && (os.status === 'Aberta' || os.status === 'Em andamento' || os.status === 'Resolvida')
     );
   }, [vehicleOrders]);
 
   const docTypes: DocumentType[] = ['CRLV', 'CIPP', 'CIV', 'Tacógrafo'];
-  const allAttachments = vehicle.attachments || [];
-  const allEquipments = vehicle.equipments || [];
+  const allAttachments = vehicle?.attachments || [];
+  const allEquipments = vehicle?.equipments || [];
   const registeredDocsCount = useMemo(() => {
-    return Object.values(vehicle.documents || {}).filter(d => d && (d.fileUrl || d.expiryDate)).length;
-  }, [vehicle.documents]);
+    if (!vehicle?.documents) return 0;
+    return Object.values(vehicle.documents).filter(d => d && (d.fileUrl || d.expiryDate)).length;
+  }, [vehicle?.documents]);
 
   const formatFileSize = (bytes: number): string => {
     if (bytes === 0) return '0 B';
@@ -484,29 +489,44 @@ export const VehicleDetailPage: React.FC<VehicleDetailPageProps> = ({
 
   // Status calculation for display
   const getEquipmentStatusBadge = (nextCalDate: string) => {
+    if (!nextCalDate) {
+      return (
+        <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1 rounded-lg bg-slate-50 text-slate-600 border border-slate-200">
+          <span>Sem data</span>
+        </span>
+      );
+    }
     const targetDate = new Date(nextCalDate);
     const refDate = new Date('2026-09-25T12:00:00Z');
     const diffDays = Math.ceil((targetDate.getTime() - refDate.getTime()) / (1000 * 60 * 60 * 24));
+
+    if (isNaN(diffDays)) {
+      return (
+        <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1 rounded-lg bg-slate-50 text-slate-700 border border-slate-200">
+          <span>{formatDisplayDate(nextCalDate)}</span>
+        </span>
+      );
+    }
 
     if (diffDays < 0) {
       return (
         <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-lg bg-rose-50 text-rose-700 border border-rose-200">
           <AlertTriangle className="w-3.5 h-3.5" />
-          <span>Vencido há {Math.abs(diffDays)}d ({nextCalDate})</span>
+          <span>Vencido há {Math.abs(diffDays)}d ({formatDisplayDate(nextCalDate)})</span>
         </span>
       );
     } else if (diffDays <= 30) {
       return (
         <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-lg bg-amber-50 text-amber-700 border border-amber-200">
           <Clock className="w-3.5 h-3.5" />
-          <span>Vence em {diffDays}d ({nextCalDate})</span>
+          <span>Vence em {diffDays}d ({formatDisplayDate(nextCalDate)})</span>
         </span>
       );
     } else {
       return (
         <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200">
           <CheckCircle2 className="w-3.5 h-3.5" />
-          <span>Calibrado ({nextCalDate})</span>
+          <span>Calibrado ({formatDisplayDate(nextCalDate)})</span>
         </span>
       );
     }
@@ -515,7 +535,7 @@ export const VehicleDetailPage: React.FC<VehicleDetailPageProps> = ({
   // General Document Upload Handler
   const handleSaveDocUpload = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!isAdmin) return;
+    if (!isAdmin || !vehicle) return;
     if (!docSelectedFile) {
       setDocUploadError('Selecione um arquivo PDF ou imagem JPG do dispositivo.');
       return;
@@ -524,7 +544,7 @@ export const VehicleDetailPage: React.FC<VehicleDetailPageProps> = ({
     const isMandatoryDoc = ['CRLV', 'CIPP', 'CIV', 'Tacógrafo'].includes(uploadCategory);
 
     if (isMandatoryDoc) {
-      const existingDoc = vehicle.documents[uploadCategory as DocumentType];
+      const existingDoc = vehicle.documents?.[uploadCategory as DocumentType];
       const effectiveExpiryDate = uploadExpiryDate || existingDoc?.expiryDate || '';
       updateVehicleDocumentWithFile(vehicle.id, uploadCategory as DocumentType, {
         expiryDate: effectiveExpiryDate,
@@ -568,6 +588,20 @@ export const VehicleDetailPage: React.FC<VehicleDetailPageProps> = ({
       (eq.certificateNumber || '').toLowerCase().includes(query)
     );
   });
+
+  if (!vehicle) {
+    return (
+      <div className="min-h-[400px] flex flex-col items-center justify-center p-8 text-center bg-slate-50">
+        <p className="text-slate-600 font-medium">Veículo não encontrado.</p>
+        <button
+          onClick={onBack}
+          className="mt-4 px-4 py-2 bg-[#ff5500] text-white rounded-xl text-sm font-semibold hover:bg-[#e64d00] transition"
+        >
+          Voltar para Frotas
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-full bg-slate-50/60 pb-16">
@@ -669,12 +703,12 @@ export const VehicleDetailPage: React.FC<VehicleDetailPageProps> = ({
                   </span>
 
                   {/* Informação dos Produtos Carregados (Gases do Ar / CO2) no Cabeçalho da Frota */}
-                  {((vehicle.type === 'Caminhão' || vehicle.type === 'Carreta') && ((vehicle.cargoProducts && vehicle.cargoProducts.length > 0) || vehicle.cargoProduct)) && (
+                  {((vehicle.type === 'Caminhão' || vehicle.type === 'Carreta') && ((Array.isArray(vehicle.cargoProducts) && vehicle.cargoProducts.length > 0) || vehicle.cargoProduct)) && (
                     <div className="flex items-center gap-1.5 flex-wrap">
-                      {(vehicle.cargoProducts && vehicle.cargoProducts.length > 0
+                      {(Array.isArray(vehicle.cargoProducts) && vehicle.cargoProducts.length > 0
                         ? vehicle.cargoProducts
                         : (vehicle.cargoProduct ? [vehicle.cargoProduct as any] : [])
-                      ).map((product: string) => {
+                      ).filter((p: any) => typeof p === 'string').map((product: string) => {
                         const isCO2 = product.includes('CO2');
                         return (
                           <span
@@ -695,7 +729,7 @@ export const VehicleDetailPage: React.FC<VehicleDetailPageProps> = ({
                   )}
 
                   {/* Medição do Vácuo no Cabeçalho da Frota (Gases do Ar): Vácuo: "Valor"mtorr. E a data. */}
-                  {((vehicle.cargoProducts?.includes('Gases do Ar (LO2, LN2, LAR)') || vehicle.cargoProduct?.includes('Gases do Ar')) && vehicle.vacuumValue != null && vehicle.vacuumValue !== '') && (
+                  {(((Array.isArray(vehicle.cargoProducts) && vehicle.cargoProducts.some(p => typeof p === 'string' && p.includes('Gases do Ar'))) || (typeof vehicle.cargoProduct === 'string' && vehicle.cargoProduct.includes('Gases do Ar'))) && vehicle.vacuumValue != null && vehicle.vacuumValue !== '') && (
                     <button
                       type="button"
                       onClick={openQuickVacuumModal}
@@ -714,7 +748,7 @@ export const VehicleDetailPage: React.FC<VehicleDetailPageProps> = ({
                   )}
 
                   {/* Botão rápido para adicionar vácuo caso ainda não tenha sido registrado */}
-                  {((vehicle.cargoProducts?.includes('Gases do Ar (LO2, LN2, LAR)') || vehicle.cargoProduct?.includes('Gases do Ar')) && (vehicle.vacuumValue == null || vehicle.vacuumValue === '')) && (
+                  {(((Array.isArray(vehicle.cargoProducts) && vehicle.cargoProducts.some(p => typeof p === 'string' && p.includes('Gases do Ar'))) || (typeof vehicle.cargoProduct === 'string' && vehicle.cargoProduct.includes('Gases do Ar'))) && (vehicle.vacuumValue == null || vehicle.vacuumValue === '')) && (
                     <button
                       type="button"
                       onClick={openQuickVacuumModal}
@@ -1564,7 +1598,7 @@ export const VehicleDetailPage: React.FC<VehicleDetailPageProps> = ({
 
               <div className="space-y-2.5">
                 {docTypes.map(dtype => {
-                  const doc = vehicle.documents[dtype];
+                  const doc = vehicle.documents?.[dtype];
                   const hasFile = !!(doc?.fileUrl);
 
                   return (

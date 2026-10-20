@@ -230,14 +230,16 @@ export const getDaysDifference = (targetDateStr: string): number => {
   return Math.ceil(diffMs / (1000 * 60 * 60 * 24));
 };
 
-export const formatDisplayDate = (dateStr?: string): string => {
+export const formatDisplayDate = (dateStr?: any): string => {
   if (!dateStr) return '';
-  if (dateStr.includes('/')) return dateStr;
-  const parts = dateStr.split('-');
+  const str = String(dateStr).trim();
+  if (!str) return '';
+  if (str.includes('/')) return str;
+  const parts = str.split('-');
   if (parts.length === 3) {
     return `${parts[2]}/${parts[1]}/${parts[0]}`;
   }
-  return dateStr;
+  return str;
 };
 
 // Helper to purge deprecated "supervisor de pátio" or supervisor from user atribuicoes
@@ -250,10 +252,16 @@ const sanitizeUserAtribuicoes = (user: User): User => ({
   ),
 });
 
-// Helper to ensure all Caminhão and Carreta vehicles have their cargo products and vacuum measurement defined
+// Helper to ensure all vehicles have valid documents, equipments, attachments and cargo products
 const enrichVehicleCargoProducts = (v: Vehicle): Vehicle => {
-  if (v.type === 'Cavalo Mecânico') return v;
-  let updated = { ...v };
+  const updated: Vehicle = {
+    ...v,
+    documents: v.documents || ({} as any),
+    equipments: Array.isArray(v.equipments) ? v.equipments : [],
+    attachments: Array.isArray(v.attachments) ? v.attachments : [],
+  };
+
+  if (updated.type === 'Cavalo Mecânico') return updated;
 
   if (!updated.cargoProducts || updated.cargoProducts.length === 0) {
     if (updated.cargoProduct) {
@@ -267,9 +275,12 @@ const enrichVehicleCargoProducts = (v: Vehicle): Vehicle => {
   }
 
   // Se carrega Gases do Ar e ainda não possui vácuo medido no cache local ou tem data antiga
-  if (
-    updated.cargoProducts?.includes('Gases do Ar (LO2, LN2, LAR)') || updated.cargoProduct?.includes('Gases do Ar')
-  ) {
+  const isGases = Boolean(
+    (Array.isArray(updated.cargoProducts) && updated.cargoProducts.some(p => typeof p === 'string' && (p.includes('Gases do Ar') || p.includes('LO2') || p.includes('LN2') || p.includes('LAR')))) ||
+    (typeof updated.cargoProduct === 'string' && (updated.cargoProduct.includes('Gases do Ar') || updated.cargoProduct.includes('LO2') || updated.cargoProduct.includes('LN2') || updated.cargoProduct.includes('LAR')))
+  );
+
+  if (isGases) {
     const init = INITIAL_VEHICLES.find(iv => iv.id === v.id || iv.fleetNumber === v.fleetNumber);
     if (init && init.vacuumValue && (updated.vacuumValue == null || updated.vacuumValue === '')) {
       updated.vacuumValue = init.vacuumValue;
