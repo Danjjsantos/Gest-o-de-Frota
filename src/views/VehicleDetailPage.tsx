@@ -192,7 +192,7 @@ export const VehicleDetailPage: React.FC<VehicleDetailPageProps> = ({
     title?: string;
   } | null>(null);
 
-  const isAdmin = currentUser?.role === 'Administrador' || currentUser?.role === 'Gerente' || currentUser?.role === 'Encarregado';
+  const isAdmin = currentUser?.role === 'Administrador';
 
   const handleExportPDF = () => {
     if (vehicle) {

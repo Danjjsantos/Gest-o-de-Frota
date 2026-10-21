@@ -9,7 +9,8 @@ interface NewVehicleModalProps {
 }
 
 export const NewVehicleModal: React.FC<NewVehicleModalProps> = ({ isOpen, onClose }) => {
-  const { addVehicle } = useFleet();
+  const { addVehicle, currentUser } = useFleet();
+  const isAdmin = currentUser?.role === 'Administrador';
 
   const [fleetNumber, setFleetNumber] = useState('');
   const [type, setType] = useState<VehicleType>('Caminhão');
@@ -72,10 +73,11 @@ export const NewVehicleModal: React.FC<NewVehicleModalProps> = ({ isOpen, onClos
     });
   };
 
-  if (!isOpen) return null;
+  if (!isOpen || !isAdmin) return null;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!isAdmin) return;
     if (!fleetNumber.trim() || !plate.trim()) {
       setError('Por favor preencha o número da frota e a placa');
       return;

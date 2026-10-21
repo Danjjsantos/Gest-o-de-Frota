@@ -13,7 +13,6 @@ import {
   Plus,
   Download,
   Lock,
-  ShieldAlert,
   Users,
   UserCheck,
   Trash2
@@ -34,7 +33,7 @@ export const ServiceOrderDetailModal: React.FC<ServiceOrderDetailModalProps> = (
   isOpen,
   onClose,
 }) => {
-  const { updateServiceOrderStatus, deleteServiceOrder, currentUser, canCloseOS, settings } = useFleet();
+  const { updateServiceOrderStatus, deleteServiceOrder, currentUser } = useFleet();
   const isAdministrator = currentUser?.role === 'Administrador';
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [status, setStatus] = useState<OSStatus>(os?.status || 'Aberta');
@@ -45,8 +44,6 @@ export const ServiceOrderDetailModal: React.FC<ServiceOrderDetailModalProps> = (
   const [error, setError] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const isExecutingTechnicalRole = !canCloseOS;
-  const isTechnician = isExecutingTechnicalRole;
   const isAlreadyClosed = os?.status === 'Encerrada';
 
   React.useEffect(() => {
@@ -82,12 +79,12 @@ export const ServiceOrderDetailModal: React.FC<ServiceOrderDetailModalProps> = (
   };
 
   const handleSave = () => {
-    if (isAlreadyClosed && status !== 'Encerrada') {
-      setError('Esta ordem de serviço já foi encerrada e não é possível alterar mais o status.');
+    if (!isAdministrator) {
+      setError('Apenas o Administrador tem permissão para editar ou encerrar ordens de serviço.');
       return;
     }
-    if (status === 'Encerrada' && isExecutingTechnicalRole) {
-      setError('Perfis executores da oficina (Mecânico, Borracheiro, Téc. Elétrica, Téc. Driox) não têm permissão para encerrar ordens de serviço. Você pode marcar como "Resolvida" ou manter "Em andamento". O encerramento definitivo deve ser feito por Motorista, Administrador, Gerente, Encarregado ou Monitor.');
+    if (isAlreadyClosed && status !== 'Encerrada') {
+      setError('Esta ordem de serviço já foi encerrada e não é possível alterar mais o status.');
       return;
     }
     try {
@@ -187,7 +184,7 @@ export const ServiceOrderDetailModal: React.FC<ServiceOrderDetailModalProps> = (
                   </h4>
                 </div>
 
-                {!isAlreadyClosed && (
+                {!isAlreadyClosed && isAdministrator && (
                   <>
                     <button
                       type="button"
@@ -238,7 +235,7 @@ export const ServiceOrderDetailModal: React.FC<ServiceOrderDetailModalProps> = (
                   <p className="text-xs text-slate-500 font-medium">
                     Nenhuma evidência fotográfica anexada.
                   </p>
-                  {!isAlreadyClosed && (
+                  {!isAlreadyClosed && isAdministrator && (
                     <button
                       type="button"
                       onClick={() => fileInputRef.current?.click()}
@@ -381,16 +378,17 @@ export const ServiceOrderDetailModal: React.FC<ServiceOrderDetailModalProps> = (
             <div>
               <div className="flex items-center justify-between mb-1.5">
                 <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
-                  {isAlreadyClosed ? 'Status da OS (Encerrada)' : 'Atualizar Status da OS'}
+                  {isAlreadyClosed ? 'Status da OS (Encerrada)' : isAdministrator ? 'Atualizar Status da OS' : 'Status da OS'}
                 </label>
                 {isAlreadyClosed ? (
                   <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-slate-200 text-slate-800 border border-slate-300 flex items-center gap-1">
                     <Lock className="w-3 h-3 text-slate-600" />
                     Status Bloqueado
                   </span>
-                ) : isTechnician ? (
-                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-200">
-                    Apenas Em andamento / Resolvida
+                ) : !isAdministrator ? (
+                  <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200 flex items-center gap-1">
+                    <Lock className="w-3 h-3 text-slate-400" />
+                    Somente Leitura (Admin)
                   </span>
                 ) : null}
               </div>
@@ -412,32 +410,35 @@ export const ServiceOrderDetailModal: React.FC<ServiceOrderDetailModalProps> = (
                     Encerrada
                   </span>
                 </div>
+              ) : !isAdministrator ? (
+                <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-slate-600">Status atual:</span>
+                    <span className="text-xs font-bold px-2.5 py-1 rounded-lg bg-white border border-slate-200 text-slate-800">
+                      {os.status}
+                    </span>
+                  </div>
+                  <span className="text-[11px] text-slate-400 italic flex items-center gap-1">
+                    <Lock className="w-3 h-3" />
+                    Edição restrita ao Administrador
+                  </span>
+                </div>
               ) : (
                 <div className="grid grid-cols-4 gap-2">
                   {statusOptions.map(st => {
                     const isSelected = status === st;
-                    const isCloseOption = st === 'Encerrada';
-                    const isBlockedForUser = isCloseOption && isTechnician;
 
                     return (
                       <button
                         key={st}
                         type="button"
-                        disabled={isBlockedForUser}
                         onClick={() => {
-                          if (isBlockedForUser) return;
                           setStatus(st);
                           setError('');
                         }}
-                        title={
-                          isBlockedForUser
-                            ? 'Técnicos não podem encerrar ordem de serviço. Apenas motorista, encarregado, monitor ou gestão.'
-                            : `Definir como ${st}`
-                        }
-                        className={`py-2 text-center rounded-xl text-xs font-semibold transition border flex items-center justify-center gap-1.5 ${
-                          isBlockedForUser
-                            ? 'bg-slate-100/90 text-slate-400 border-slate-200 cursor-not-allowed opacity-60'
-                            : isSelected
+                        title={`Definir como ${st}`}
+                        className={`py-2 text-center rounded-xl text-xs font-semibold transition border flex items-center justify-center gap-1.5 cursor-pointer ${
+                          isSelected
                             ? st === 'Resolvida'
                               ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
                               : st === 'Encerrada'
@@ -448,32 +449,12 @@ export const ServiceOrderDetailModal: React.FC<ServiceOrderDetailModalProps> = (
                             : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
                         }`}
                       >
-                        {isBlockedForUser && <Lock className="w-3 h-3 text-slate-400 shrink-0" />}
                         <span>{st}</span>
                       </button>
                     );
                   })}
                 </div>
               )}
-
-              {/* Role explanation banner */}
-              {!isAlreadyClosed && (isTechnician ? (
-                <div className="mt-2.5 p-2.5 bg-amber-50/90 border border-amber-200/90 rounded-xl flex items-start gap-2 text-[11px] text-amber-900 leading-relaxed">
-                  <ShieldAlert className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
-                  <div>
-                    <span className="font-bold block text-amber-800">Restrição de Perfil Executor ({currentUser?.name}):</span>
-                    <span>Perfis executores da manutenção (Mecânico, Borracheiro, Téc. Elétrica, Téc. Driox) não encerram a OS, apenas <strong>resolvem</strong> ou mantêm <strong>em andamento</strong>. O encerramento definitivo é validado por Motorista, Encarregado, Monitor ou Gerente/Administrador.</span>
-                  </div>
-                </div>
-              ) : (
-                <div className="mt-2 flex items-center justify-between px-1 text-[11px] text-slate-500">
-                  <span>Perfil ativo: <strong className="text-slate-700">{currentUser?.name || 'Usuário'}</strong> ({currentUser?.role || 'Admin'})</span>
-                  <span className="text-emerald-700 font-semibold flex items-center gap-1">
-                    <CheckCircle2 className="w-3.5 h-3.5" />
-                    Autorizado a encerrar OS
-                  </span>
-                </div>
-              ))}
             </div>
 
             {/* Resolution notes */}
@@ -481,7 +462,7 @@ export const ServiceOrderDetailModal: React.FC<ServiceOrderDetailModalProps> = (
               <label className="block text-xs font-bold text-slate-700 mb-1 uppercase tracking-wider">
                 Parecer Técnico / Solução Aplicada
               </label>
-              {isAlreadyClosed ? (
+              {(isAlreadyClosed || !isAdministrator) ? (
                 <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-700 leading-relaxed font-sans">
                   {resolutionNotes ? (
                     <p className="whitespace-pre-wrap">{resolutionNotes}</p>
@@ -535,14 +516,14 @@ export const ServiceOrderDetailModal: React.FC<ServiceOrderDetailModalProps> = (
                 type="button"
                 onClick={onClose}
                 className={`px-5 py-2 text-xs font-bold rounded-xl transition cursor-pointer ${
-                  isAlreadyClosed
+                  (isAlreadyClosed || !isAdministrator)
                     ? 'bg-slate-900 hover:bg-slate-800 text-white shadow-xs active:scale-95'
                     : 'text-slate-600 bg-white border border-slate-200 hover:bg-slate-100'
                 }`}
               >
                 Fechar
               </button>
-              {!isAlreadyClosed && (
+              {isAdministrator && !isAlreadyClosed && (
                 <button
                   type="button"
                   onClick={handleSave}

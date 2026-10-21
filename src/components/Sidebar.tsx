@@ -178,12 +178,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
             );
           })}
 
-          {/* Quick Action Button for Nova OS */}
-          {onOpenNewOS && (
+          {/* Quick Action Button for Nova OS (Admin Only) */}
+          {currentUser?.role === 'Administrador' && onOpenNewOS && (
             <div className="pt-3">
               <button
                 onClick={handleOpenOS}
-                className="w-full flex items-center justify-center gap-2 bg-[#ff5500] hover:bg-[#ea4e00] text-white py-2.5 px-3 rounded-xl text-xs font-bold shadow-md shadow-orange-950/30 transition active:scale-95"
+                className="w-full flex items-center justify-center gap-2 bg-[#ff5500] hover:bg-[#ea4e00] text-white py-2.5 px-3 rounded-xl text-xs font-bold shadow-md shadow-orange-950/30 transition active:scale-95 cursor-pointer"
               >
                 <Plus className="w-4 h-4 stroke-[3]" />
                 <span>Nova Ordem de Serviço</span>

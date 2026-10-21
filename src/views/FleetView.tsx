@@ -10,7 +10,8 @@ import {
   FileCheck,
   Gauge,
   Fuel,
-  Trash2
+  Trash2,
+  Lock
 } from 'lucide-react';
 import { useFleet, formatDisplayDate } from '../context/FleetContext';
 import { Vehicle, VehicleType, DocumentType, ServiceOrder } from '../types';
@@ -640,28 +641,33 @@ export const FleetView: React.FC<FleetViewProps> = ({
 
         <div className="flex items-center gap-2.5">
           {isFullAccessUser && (
-            <>
-              <button
-                onClick={handleExportAll}
-                className={`hidden sm:flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition border shadow-xs ${
-                  exportSuccess
-                    ? 'bg-emerald-600 text-white border-emerald-600'
-                    : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
-                }`}
-                title="Exportar listagem completa da frota em PDF"
-              >
-                <Download className={`w-3.5 h-3.5 ${exportSuccess ? 'text-white' : 'text-[#ff5500]'}`} />
-                <span>{exportSuccess ? 'PDF Baixado!' : 'Exportar PDF'}</span>
-              </button>
+            <button
+              onClick={handleExportAll}
+              className={`hidden sm:flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition border shadow-xs ${
+                exportSuccess
+                  ? 'bg-emerald-600 text-white border-emerald-600'
+                  : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+              }`}
+              title="Exportar listagem completa da frota em PDF"
+            >
+              <Download className={`w-3.5 h-3.5 ${exportSuccess ? 'text-white' : 'text-[#ff5500]'}`} />
+              <span>{exportSuccess ? 'PDF Baixado!' : 'Exportar PDF'}</span>
+            </button>
+          )}
 
-              <button
-                onClick={onOpenNewVehicleModal}
-                className="flex items-center gap-2 bg-[#ff5500] hover:bg-[#e64d00] text-white px-5 py-2.5 rounded-xl text-xs sm:text-sm font-bold shadow-md shadow-orange-500/20 transition active:scale-95 whitespace-nowrap cursor-pointer"
-              >
-                <Plus className="w-4 h-4 stroke-[3]" />
-                <span>Novo Veículo</span>
-              </button>
-            </>
+          {isAdmin ? (
+            <button
+              onClick={onOpenNewVehicleModal}
+              className="flex items-center gap-2 bg-[#ff5500] hover:bg-[#e64d00] text-white px-5 py-2.5 rounded-xl text-xs sm:text-sm font-bold shadow-md shadow-orange-500/20 transition active:scale-95 whitespace-nowrap cursor-pointer"
+            >
+              <Plus className="w-4 h-4 stroke-[3]" />
+              <span>Novo Veículo</span>
+            </button>
+          ) : (
+            <div className="flex items-center gap-1.5 px-3 py-2 bg-slate-100 text-slate-500 rounded-xl text-xs font-medium border border-slate-200" title="Apenas o Administrador pode cadastrar novos veículos">
+              <Lock className="w-3.5 h-3.5 text-slate-400" />
+              <span>Somente Leitura</span>
+            </div>
           )}
         </div>
       </div>

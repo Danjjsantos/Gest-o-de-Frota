@@ -9,7 +9,8 @@ interface NewUserModalProps {
 }
 
 export const NewUserModal: React.FC<NewUserModalProps> = ({ isOpen, onClose }) => {
-  const { addUser } = useFleet();
+  const { addUser, currentUser } = useFleet();
+  const isAdmin = currentUser?.role === 'Administrador';
 
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -19,7 +20,7 @@ export const NewUserModal: React.FC<NewUserModalProps> = ({ isOpen, onClose }) =
   const [phone, setPhone] = useState('');
   const [error, setError] = useState('');
 
-  if (!isOpen) return null;
+  if (!isOpen || !isAdmin) return null;
 
   const roles: UserRole[] = [
     'Motorista',
@@ -75,6 +76,7 @@ export const NewUserModal: React.FC<NewUserModalProps> = ({ isOpen, onClose }) =
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!isAdmin) return;
     if (!name.trim() || !email.trim()) {
       setError('Preencha o nome e e-mail do usuário');
       return;

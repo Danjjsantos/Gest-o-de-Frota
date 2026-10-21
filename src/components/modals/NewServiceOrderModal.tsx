@@ -39,7 +39,8 @@ export const NewServiceOrderModal: React.FC<NewServiceOrderModalProps> = ({
   preselectedVehicleId,
   lockVehicleSelection = false
 }) => {
-  const { vehicles, openServiceOrder } = useFleet();
+  const { vehicles, openServiceOrder, currentUser } = useFleet();
+  const isAdmin = currentUser?.role === 'Administrador';
 
   const [vehicleSearch, setVehicleSearch] = useState('');
   const [selectedVehicleId, setSelectedVehicleId] = useState<string>(preselectedVehicleId || '');
@@ -77,7 +78,7 @@ export const NewServiceOrderModal: React.FC<NewServiceOrderModalProps> = ({
     );
   }, [vehicles, vehicleSearch]);
 
-  if (!isOpen) return null;
+  if (!isOpen || !isAdmin) return null;
 
   // File Processing (Images from local storage)
   const processFiles = (files: FileList | File[]) => {
@@ -173,6 +174,10 @@ export const NewServiceOrderModal: React.FC<NewServiceOrderModalProps> = ({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!isAdmin) {
+      setError('Apenas o Administrador pode abrir ordens de serviço.');
+      return;
+    }
     if (!selectedVehicleId) {
       setError('Selecione o veículo da frota');
       return;

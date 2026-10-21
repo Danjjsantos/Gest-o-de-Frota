@@ -15,7 +15,8 @@ import {
   Calendar,
   Users,
   ShieldCheck,
-  Trash2
+  Trash2,
+  Lock
 } from 'lucide-react';
 import { useFleet } from '../context/FleetContext';
 import { ServiceOrder, OSCategory, OSStatus } from '../types';
@@ -187,13 +188,20 @@ export const ServiceOrdersView: React.FC<ServiceOrdersViewProps> = ({
             </button>
           </div>
 
-          <button
-            onClick={onOpenNewOS}
-            className="flex items-center gap-2 bg-[#ff5500] hover:bg-[#e64d00] text-white px-4 sm:px-5 py-2 rounded-xl text-xs font-black uppercase tracking-wider shadow-md shadow-orange-500/20 transition active:scale-95 whitespace-nowrap"
-          >
-            <Plus className="w-4 h-4 stroke-[3]" />
-            <span>Nova OS</span>
-          </button>
+          {isAdmin ? (
+            <button
+              onClick={onOpenNewOS}
+              className="flex items-center gap-2 bg-[#ff5500] hover:bg-[#e64d00] text-white px-4 sm:px-5 py-2 rounded-xl text-xs font-black uppercase tracking-wider shadow-md shadow-orange-500/20 transition active:scale-95 whitespace-nowrap cursor-pointer"
+            >
+              <Plus className="w-4 h-4 stroke-[3]" />
+              <span>Nova OS</span>
+            </button>
+          ) : (
+            <div className="flex items-center gap-1.5 px-3 py-2 bg-slate-100 text-slate-500 rounded-xl text-xs font-medium border border-slate-200" title="Apenas o Administrador pode abrir ordens de serviço">
+              <Lock className="w-3.5 h-3.5 text-slate-400" />
+              <span>Somente Leitura</span>
+            </div>
+          )}
         </div>
       </div>
 

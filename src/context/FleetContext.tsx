@@ -1061,6 +1061,10 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   };
 
   const addUser = (userData: Omit<User, 'id' | 'createdAt'>): User => {
+    if (currentUser && currentUser.role !== 'Administrador') {
+      console.warn('Operação negada: Apenas Administrador pode cadastrar novos usuários.');
+      return {} as User;
+    }
     const sanitized = sanitizeUserAtribuicoes({
       ...userData,
       id: `user-${Date.now()}`,
@@ -1082,6 +1086,19 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   };
 
   const updateUser = (id: string, updates: Partial<User>) => {
+    if (currentUser && currentUser.role !== 'Administrador') {
+      // Non-administrators can only update their own phone or password via MyProfile
+      if (currentUser.id !== id) {
+        console.warn('Operação negada: Apenas o Administrador pode alterar dados de outros usuários.');
+        return;
+      }
+      // Non-admins cannot alter their role, name, email or atribuições
+      updates = {
+        phone: updates.phone,
+        password: updates.password,
+      };
+    }
+
     setUsers(prev => {
       const updated = prev.map(u => {
         if (u.id !== id) return u;
@@ -1101,6 +1118,10 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   };
 
   const deleteUser = (id: string) => {
+    if (currentUser && currentUser.role !== 'Administrador') {
+      console.warn('Operação negada: Apenas Administrador pode excluir usuários.');
+      return;
+    }
     setUsers(prev => prev.filter(u => u.id !== id));
     SupabaseService.deleteUser(id).catch(err => {
       console.debug('Supabase delete user notice:', err?.message);
@@ -1108,6 +1129,10 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   };
 
   const addVehicle = (vehicleData: Omit<Vehicle, 'id' | 'createdAt'>): Vehicle => {
+    if (currentUser && currentUser.role !== 'Administrador') {
+      console.warn('Operação negada: Apenas Administrador pode cadastrar veículos.');
+      return {} as Vehicle;
+    }
     const newVehicle: Vehicle = {
       ...vehicleData,
       id: `veh-${Date.now()}`,
@@ -1121,6 +1146,10 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   };
 
   const updateVehicle = (id: string, updates: Partial<Vehicle>) => {
+    if (currentUser && currentUser.role !== 'Administrador') {
+      console.warn('Operação negada: Apenas Administrador pode alterar veículos.');
+      return;
+    }
     setVehicles(prev => {
       const updated = prev.map(v => v.id === id ? { ...v, ...updates } : v);
       const target = updated.find(v => v.id === id);
@@ -1134,6 +1163,10 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   };
 
   const deleteVehicle = (id: string) => {
+    if (currentUser && currentUser.role !== 'Administrador') {
+      console.warn('Operação negada: Apenas Administrador pode excluir veículos.');
+      return;
+    }
     setVehicles(prev => prev.filter(v => v.id !== id));
     SupabaseService.deleteVehicle(id).catch(err => {
       console.debug('Supabase delete vehicle background notice:', err?.message);
@@ -1150,6 +1183,10 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   };
 
   const updateVehicleDocument = (vehicleId: string, docType: DocumentType, expiryDate: string, number?: string) => {
+    if (currentUser && currentUser.role !== 'Administrador') {
+      console.warn('Operação negada: Apenas Administrador pode atualizar datas de documentos.');
+      return;
+    }
     setVehicles(prev => {
       const updated = prev.map(v => {
         if (v.id !== vehicleId) return v;
@@ -1192,6 +1229,10 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       notes?: string; 
     }
   ) => {
+    if (currentUser && currentUser.role !== 'Administrador') {
+      console.warn('Operação negada: Apenas Administrador pode cadastrar arquivos de documentos.');
+      return;
+    }
     let createdAttachment: VehicleAttachment | null = null;
     let savedDoc: any = null;
 
@@ -1269,6 +1310,10 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   };
 
   const addVehicleAttachment = (vehicleId: string, attachment: Omit<VehicleAttachment, 'id' | 'uploadedAt'>) => {
+    if (currentUser && currentUser.role !== 'Administrador') {
+      console.warn('Operação negada: Apenas Administrador pode anexar arquivos.');
+      return;
+    }
     const newAtt: VehicleAttachment = {
       ...attachment,
       id: `att-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
@@ -1298,6 +1343,10 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   };
 
   const removeVehicleAttachment = (vehicleId: string, attachmentId: string) => {
+    if (currentUser && currentUser.role !== 'Administrador') {
+      console.warn('Operação negada: Apenas Administrador pode remover anexos.');
+      return;
+    }
     setVehicles(prev => {
       const updated = prev.map(v => {
         if (v.id !== vehicleId) return v;
@@ -1318,6 +1367,10 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   };
 
   const deleteVehicleDocument = (vehicleId: string, docType: DocumentType) => {
+    if (currentUser && currentUser.role !== 'Administrador') {
+      console.warn('Operação negada: Apenas Administrador pode excluir documentos.');
+      return;
+    }
     setVehicles(prev => {
       const updated = prev.map(v => {
         if (v.id !== vehicleId) return v;
@@ -1349,6 +1402,10 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   };
 
   const addVehicleEquipment = (vehicleId: string, equipment: Omit<VehicleEquipment, 'id'>) => {
+    if (currentUser && currentUser.role !== 'Administrador') {
+      console.warn('Operação negada: Apenas Administrador pode cadastrar equipamentos.');
+      return;
+    }
     setVehicles(prev => {
       const updated = prev.map(v => {
         if (v.id !== vehicleId) return v;
@@ -1391,6 +1448,10 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   };
 
   const updateVehicleEquipment = (vehicleId: string, equipmentId: string, updates: Partial<VehicleEquipment>) => {
+    if (currentUser && currentUser.role !== 'Administrador') {
+      console.warn('Operação negada: Apenas Administrador pode alterar equipamentos.');
+      return;
+    }
     setVehicles(prev => {
       const updated = prev.map(v => {
         if (v.id !== vehicleId) return v;
@@ -1422,6 +1483,10 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   };
 
   const deleteVehicleEquipment = (vehicleId: string, equipmentId: string) => {
+    if (currentUser && currentUser.role !== 'Administrador') {
+      console.warn('Operação negada: Apenas Administrador pode excluir equipamentos.');
+      return;
+    }
     setVehicles(prev => {
       const updated = prev.map(v => {
         if (v.id !== vehicleId) return v;
@@ -1438,16 +1503,12 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   };
 
   const CAN_CLOSE_OS_ROLES: UserRole[] = [
-    'Motorista',
-    'Administrador',
-    'Gerente',
-    'Encarregado',
-    'Monitor'
+    'Administrador'
   ];
 
   const canUserCloseOS = (user?: User | null): boolean => {
-    if (!user) return true;
-    return CAN_CLOSE_OS_ROLES.includes(user.role);
+    if (!user) return false;
+    return user.role === 'Administrador';
   };
 
   const canCloseOS = canUserCloseOS(currentUser);
@@ -1495,6 +1556,9 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     images?: string[];
     attachments?: OSAttachment[];
   }): ServiceOrder => {
+    if (currentUser && currentUser.role !== 'Administrador') {
+      throw new Error('Apenas o Administrador tem permissão para abrir novas Ordens de Serviço.');
+    }
     const vehicle = vehicles.find(v => v.id === data.vehicleId);
     if (!vehicle) throw new Error('Veículo não encontrado');
 
@@ -1606,15 +1670,15 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       closedByRole?: string;
     }
   ) => {
+    // Only Administrador can edit or update service orders
+    if (currentUser && currentUser.role !== 'Administrador') {
+      throw new Error('Apenas o Administrador tem permissão para editar ordens de serviço.');
+    }
+
     // If the service order is already closed, strictly disallow any modification (read-only)
     const targetOS = serviceOrders.find(os => os.id === id);
     if (targetOS && targetOS.status === 'Encerrada') {
       throw new Error('Esta ordem de serviço já foi encerrada e está bloqueada para qualquer atualização de informações (apenas visualização permitida).');
-    }
-
-    // Only motorista, administrador, gerente, encarregado, monitor can close ("encerrar")
-    if (status === 'Encerrada' && currentUser && !canUserCloseOS(currentUser)) {
-      throw new Error('Apenas motorista, administrador, gerente, encarregado e monitor podem encerrar ordens de serviço. Técnicos só podem colocar Em andamento ou marcar como Resolvida.');
     }
 
     setServiceOrders(prev => {
@@ -1689,6 +1753,9 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   };
 
   const deleteServiceOrder = (id: string) => {
+    if (currentUser && currentUser.role !== 'Administrador') {
+      throw new Error('Apenas o Administrador tem permissão para excluir ordens de serviço.');
+    }
     setServiceOrders(prev => prev.filter(os => os.id !== id));
     SupabaseService.deleteServiceOrder(id).catch(err => {
       console.debug('Supabase delete OS background notice:', err?.message);
@@ -1708,6 +1775,10 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   };
 
   const updateSettings = (newSettings: Partial<NotificationSettings>) => {
+    if (currentUser && currentUser.role !== 'Administrador') {
+      console.warn('Operação negada: Apenas Administrador pode alterar configurações de notificações.');
+      return;
+    }
     setSettings(prev => ({ ...prev, ...newSettings }));
   };
 

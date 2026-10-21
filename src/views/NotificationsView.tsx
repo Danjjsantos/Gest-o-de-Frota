@@ -64,7 +64,7 @@ export const NotificationsView: React.FC<NotificationsViewProps> = ({ onNavigate
     criticalExpiringList
   } = useFleet();
 
-  const isAdmin = currentUser?.role === 'Administrador' || currentUser?.role === 'Gerente';
+  const isAdmin = currentUser?.role === 'Administrador';
 
   const [senderEmail, setSenderEmail] = useState(settings.senderEmail);
   const [daysThreshold, setDaysThreshold] = useState(settings.daysThreshold);
@@ -112,7 +112,7 @@ export const NotificationsView: React.FC<NotificationsViewProps> = ({ onNavigate
 
   const handleAddRecipient = (emailToAdd?: string) => {
     if (!isAdmin) {
-      setRecipientError('Apenas Administradores ou Gerentes podem alterar os e-mails de notificação.');
+      setRecipientError('Apenas Administradores podem alterar os e-mails de notificação.');
       return;
     }
     setRecipientError('');
@@ -159,6 +159,7 @@ export const NotificationsView: React.FC<NotificationsViewProps> = ({ onNavigate
 
   const handleSaveSettings = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!isAdmin) return;
     const parsed = Number(daysThreshold) || 30;
     const parsedCritical = Number(criticalDaysThreshold) || 7;
     updateSettings({
@@ -175,6 +176,7 @@ export const NotificationsView: React.FC<NotificationsViewProps> = ({ onNavigate
   };
 
   const handleApplyCriticalThreshold = (days: number) => {
+    if (!isAdmin) return;
     setCriticalDaysThreshold(days);
     updateSettings({ criticalDaysThreshold: days });
     setIsSaved(true);
@@ -184,13 +186,14 @@ export const NotificationsView: React.FC<NotificationsViewProps> = ({ onNavigate
   const handleRequestPush = async () => {
     const granted = await requestBrowserNotificationPermission();
     setPushPermission(getNotificationPermission());
-    if (granted) {
+    if (granted && isAdmin) {
       setBrowserPushEnabled(true);
       updateSettings({ browserPushEnabled: true });
     }
   };
 
   const handleApplyThresholdPreset = (days: number) => {
+    if (!isAdmin) return;
     setDaysThreshold(days);
     updateSettings({ daysThreshold: days });
     setIsSaved(true);
@@ -927,8 +930,11 @@ export const NotificationsView: React.FC<NotificationsViewProps> = ({ onNavigate
                     <button
                       type="button"
                       key={days}
+                      disabled={!isAdmin}
                       onClick={() => handleApplyCriticalThreshold(days)}
-                      className={`py-1 px-1.5 rounded-lg text-[11px] font-black transition cursor-pointer text-center ${
+                      className={`py-1 px-1.5 rounded-lg text-[11px] font-black transition text-center ${
+                        !isAdmin ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
+                      } ${
                         Number(criticalDaysThreshold) === days
                           ? 'bg-red-600 text-white shadow-2xs'
                           : 'bg-white text-slate-700 border border-slate-200 hover:bg-red-50'
@@ -967,12 +973,14 @@ export const NotificationsView: React.FC<NotificationsViewProps> = ({ onNavigate
                   </button>
                   <input
                     type="checkbox"
+                    disabled={!isAdmin}
                     checked={soundAlertEnabled}
                     onChange={e => {
+                      if (!isAdmin) return;
                       setSoundAlertEnabled(e.target.checked);
                       updateSettings({ soundAlertEnabled: e.target.checked });
                     }}
-                    className="w-4 h-4 text-[#ff5500] rounded focus:ring-0 cursor-pointer accent-[#ff5500]"
+                    className="w-4 h-4 text-[#ff5500] rounded focus:ring-0 cursor-pointer accent-[#ff5500] disabled:opacity-50 disabled:cursor-not-allowed"
                   />
                 </div>
               </div>
@@ -1004,12 +1012,14 @@ export const NotificationsView: React.FC<NotificationsViewProps> = ({ onNavigate
                   </button>
                   <input
                     type="checkbox"
+                    disabled={!isAdmin}
                     checked={popupAlertEnabled}
                     onChange={e => {
+                      if (!isAdmin) return;
                       setPopupAlertEnabled(e.target.checked);
                       updateSettings({ popupAlertEnabled: e.target.checked });
                     }}
-                    className="w-4 h-4 text-[#ff5500] rounded focus:ring-0 cursor-pointer accent-[#ff5500]"
+                    className="w-4 h-4 text-[#ff5500] rounded focus:ring-0 cursor-pointer accent-[#ff5500] disabled:opacity-50 disabled:cursor-not-allowed"
                   />
                 </div>
               </div>
@@ -1042,15 +1052,17 @@ export const NotificationsView: React.FC<NotificationsViewProps> = ({ onNavigate
                   ) : null}
                   <input
                     type="checkbox"
+                    disabled={!isAdmin}
                     checked={browserPushEnabled}
                     onChange={e => {
+                      if (!isAdmin) return;
                       setBrowserPushEnabled(e.target.checked);
                       updateSettings({ browserPushEnabled: e.target.checked });
                       if (e.target.checked && pushPermission !== 'granted') {
                         handleRequestPush();
                       }
                     }}
-                    className="w-4 h-4 text-[#ff5500] rounded focus:ring-0 cursor-pointer accent-[#ff5500]"
+                    className="w-4 h-4 text-[#ff5500] rounded focus:ring-0 cursor-pointer accent-[#ff5500] disabled:opacity-50 disabled:cursor-not-allowed"
                   />
                 </div>
               </div>
@@ -1081,8 +1093,11 @@ export const NotificationsView: React.FC<NotificationsViewProps> = ({ onNavigate
                   <button
                     type="button"
                     key={days}
+                    disabled={!isAdmin}
                     onClick={() => handleApplyThresholdPreset(days)}
-                    className={`py-1.5 px-2 rounded-lg text-xs font-bold transition text-center cursor-pointer ${
+                    className={`py-1.5 px-2 rounded-lg text-xs font-bold transition text-center ${
+                      !isAdmin ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
+                    } ${
                       Number(daysThreshold) === days
                         ? 'bg-[#ff5500] text-white shadow-xs'
                         : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
@@ -1096,11 +1111,12 @@ export const NotificationsView: React.FC<NotificationsViewProps> = ({ onNavigate
               <div className="flex items-center gap-2">
                 <input
                   type="number"
+                  disabled={!isAdmin}
                   value={daysThreshold}
                   onChange={e => setDaysThreshold(Number(e.target.value))}
                   min={1}
                   max={120}
-                  className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono font-bold focus:outline-none focus:ring-2 focus:ring-[#ff5500]"
+                  className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono font-bold focus:outline-none focus:ring-2 focus:ring-[#ff5500] disabled:opacity-60 disabled:cursor-not-allowed"
                 />
                 <span className="text-xs text-slate-500 font-bold whitespace-nowrap">dias</span>
               </div>
@@ -1146,10 +1162,11 @@ export const NotificationsView: React.FC<NotificationsViewProps> = ({ onNavigate
               </label>
               <input
                 type="email"
+                disabled={!isAdmin}
                 value={senderEmail}
                 onChange={e => setSenderEmail(e.target.value)}
                 placeholder="notificacoes@gestaofrotas.com.br"
-                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono focus:outline-none focus:ring-2 focus:ring-[#ff5500]"
+                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono focus:outline-none focus:ring-2 focus:ring-[#ff5500] disabled:opacity-60 disabled:cursor-not-allowed"
               />
             </div>
 
@@ -1314,13 +1331,20 @@ export const NotificationsView: React.FC<NotificationsViewProps> = ({ onNavigate
               </div>
             </div>
 
-            <button
-              type="submit"
-              className="w-full bg-[#ff5500] hover:bg-[#e64d00] text-white font-black py-2.5 px-4 rounded-xl text-xs shadow-md shadow-orange-500/20 transition flex items-center justify-center gap-2 cursor-pointer active:scale-98"
-            >
-              {isSaved ? <Check className="w-4 h-4" /> : null}
-              <span>{isSaved ? 'Configurações Salvas!' : 'Salvar Parâmetros'}</span>
-            </button>
+            {isAdmin ? (
+              <button
+                type="submit"
+                className="w-full bg-[#ff5500] hover:bg-[#e64d00] text-white font-black py-2.5 px-4 rounded-xl text-xs shadow-md shadow-orange-500/20 transition flex items-center justify-center gap-2 cursor-pointer active:scale-98"
+              >
+                {isSaved ? <Check className="w-4 h-4" /> : null}
+                <span>{isSaved ? 'Configurações Salvas!' : 'Salvar Parâmetros'}</span>
+              </button>
+            ) : (
+              <div className="w-full bg-slate-100 text-slate-500 font-bold py-2.5 px-4 rounded-xl text-xs flex items-center justify-center gap-2 border border-slate-200">
+                <Lock className="w-3.5 h-3.5 text-slate-400" />
+                <span>Alteração restrita ao Administrador</span>
+              </div>
+            )}
           </form>
         </div>
       </div>

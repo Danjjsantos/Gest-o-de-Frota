@@ -162,10 +162,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </>
           )}
 
-          {onOpenNewOS && (
+          {currentUser?.role === 'Administrador' && onOpenNewOS && (
             <button
               onClick={onOpenNewOS}
-              className="flex items-center gap-2 bg-[#ff5500] hover:bg-[#ea4e00] text-white px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider shadow-md shadow-orange-500/20 transition active:scale-95 whitespace-nowrap"
+              className="flex items-center gap-2 bg-[#ff5500] hover:bg-[#ea4e00] text-white px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider shadow-md shadow-orange-500/20 transition active:scale-95 whitespace-nowrap cursor-pointer"
             >
               <Plus className="w-4 h-4 stroke-[3]" />
               <span>Nova OS</span>

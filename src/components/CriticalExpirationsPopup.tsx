@@ -46,6 +46,7 @@ export const CriticalExpirationsPopup: React.FC<CriticalExpirationsPopupProps> =
   const threshold = settings.criticalDaysThreshold || 7;
 
   const handleToggleSound = () => {
+    if (currentUser?.role !== 'Administrador') return;
     const nextState = !settings.soundAlertEnabled;
     updateSettings({ soundAlertEnabled: nextState });
     if (nextState) {

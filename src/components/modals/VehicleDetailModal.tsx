@@ -104,7 +104,7 @@ export const VehicleDetailModal: React.FC<VehicleDetailModalProps> = ({
 
   if (!isOpen || !vehicle) return null;
 
-  const isAdmin = currentUser?.role === 'Administrador' || currentUser?.role === 'Gerente' || currentUser?.role === 'Encarregado';
+  const isAdmin = currentUser?.role === 'Administrador';
 
   const handleExportPDF = () => {
     generateVehicleDossierPDF(vehicle, serviceOrders, users);
@@ -245,7 +245,7 @@ export const VehicleDetailModal: React.FC<VehicleDetailModalProps> = ({
   };
 
   const handleSaveDocDate = (docType: DocumentType) => {
-    if (!newDate) return;
+    if (!isAdmin || !newDate) return;
     updateVehicleDocument(vehicle.id, docType, newDate);
     setEditingDoc(null);
     setNewDate('');
