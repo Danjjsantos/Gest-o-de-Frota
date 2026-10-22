@@ -252,6 +252,24 @@ const sanitizeUserAtribuicoes = (user: User): User => ({
   ),
 });
 
+// Persistent tracking of deleted equipment IDs so example / cached equipments never return upon page refresh
+const getDeletedEquipmentIds = (): Set<string> => {
+  try {
+    const saved = localStorage.getItem('gestao_frotas_deleted_equipment_ids');
+    return saved ? new Set(JSON.parse(saved)) : new Set();
+  } catch {
+    return new Set();
+  }
+};
+
+const addDeletedEquipmentId = (id: string) => {
+  try {
+    const deleted = getDeletedEquipmentIds();
+    deleted.add(id);
+    localStorage.setItem('gestao_frotas_deleted_equipment_ids', JSON.stringify(Array.from(deleted)));
+  } catch {}
+};
+
 // Helper to ensure all vehicles have valid documents, equipments, attachments and cargo products
 const enrichVehicleCargoProducts = (v: Vehicle): Vehicle => {
   const updated: Vehicle = {
@@ -324,6 +342,7 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   });
 
   const [vehicles, setVehicles] = useState<Vehicle[]>(() => {
+    const deletedEqIds = getDeletedEquipmentIds();
     let rawList: Vehicle[] = INITIAL_VEHICLES;
     try {
       const saved = localStorage.getItem('gestao_frotas_vehicles');
@@ -332,7 +351,7 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       }
     } catch {}
 
-    // Check dedicated equipment backup to ensure no equipments are lost
+    // Check dedicated equipment backup to ensure no equipments are lost, but exclude deleted ones
     try {
       const eqBackupStr = localStorage.getItem('gestao_frotas_equipments_backup');
       if (eqBackupStr) {
@@ -343,7 +362,7 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             const currentIds = new Set((v.equipments || []).map(e => e.id));
             const merged = [
               ...(v.equipments || []),
-              ...backedUp.filter((be: any) => !currentIds.has(be.id))
+              ...backedUp.filter((be: any) => !currentIds.has(be.id) && !deletedEqIds.has(be.id))
             ];
             return { ...v, equipments: merged };
           }
@@ -352,18 +371,11 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       }
     } catch {}
 
-    // Ensure all registered equipments from initial data are present if missing
-    rawList = rawList.map(v => {
-      const initV = INITIAL_VEHICLES.find(iv => iv.id === v.id || iv.fleetNumber === v.fleetNumber);
-      if (initV && initV.equipments && initV.equipments.length > 0) {
-        const currentIds = new Set((v.equipments || []).map(e => e.id));
-        const missing = initV.equipments.filter(e => !currentIds.has(e.id));
-        if (missing.length > 0) {
-          return { ...v, equipments: [...(v.equipments || []), ...missing] };
-        }
-      }
-      return v;
-    });
+    // Exclude any deleted equipments so they never return upon refresh
+    rawList = rawList.map(v => ({
+      ...v,
+      equipments: (v.equipments || []).filter(e => !deletedEqIds.has(e.id))
+    }));
 
     return rawList.map(enrichVehicleCargoProducts);
   });
@@ -431,24 +443,30 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     loadVehiclesFromIdb().then(idbVehicles => {
       isIdbLoadedRef.current = true;
       if (isMounted && idbVehicles && idbVehicles.length > 0) {
+        const deletedEqIds = getDeletedEquipmentIds();
         setVehicles(prev => {
           // Iterate over all prev vehicles and merge with IDB data
           const updatedList = prev.map(local => {
             const idbMatch = idbVehicles.find(iv => iv.id === local.id);
-            if (!idbMatch) return local;
+            if (!idbMatch) {
+              return {
+                ...local,
+                equipments: (local.equipments || []).filter(e => !deletedEqIds.has(e.id))
+              };
+            }
             const enriched = enrichVehicleCargoProducts(idbMatch);
 
-            // Merge equipments: prefer ones with files/data
-            const currentEqIds = new Set((local.equipments || []).map(e => e.id));
-            const extraEqs = (enriched.equipments || []).filter(ee => !currentEqIds.has(ee.id));
-            const mergedEqs = (local.equipments || []).map(le => {
-              const ie = (enriched.equipments || []).find(e => e.id === le.id);
-              return {
-                ...le,
-                fileUrl: le.fileUrl || ie?.fileUrl || undefined,
-                dataUrl: le.dataUrl || ie?.dataUrl || undefined,
-              };
-            });
+            // Merge equipments: retain existing ones without deleted, fill missing fileUrl/dataUrl
+            const mergedEqs = (local.equipments || [])
+              .filter(le => !deletedEqIds.has(le.id))
+              .map(le => {
+                const ie = (enriched.equipments || []).find(e => e.id === le.id);
+                return {
+                  ...le,
+                  fileUrl: le.fileUrl || ie?.fileUrl || undefined,
+                  dataUrl: le.dataUrl || ie?.dataUrl || undefined,
+                };
+              });
 
             // Merge attachments: preserve dataUrl from IDB if local was stripped
             const idbAttMap = new Map((enriched.attachments || []).map(a => [a.id, a]));
@@ -496,7 +514,7 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               ...local,
               documents: mergedDocs,
               attachments: mergedAtts,
-              equipments: [...mergedEqs, ...extraEqs],
+              equipments: mergedEqs,
             };
           });
 
@@ -504,7 +522,11 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           const prevIds = new Set(prev.map(p => p.id));
           const missingVehicles = idbVehicles
             .filter(iv => !prevIds.has(iv.id))
-            .map(enrichVehicleCargoProducts);
+            .map(enrichVehicleCargoProducts)
+            .map(v => ({
+              ...v,
+              equipments: (v.equipments || []).filter(e => !deletedEqIds.has(e.id))
+            }));
 
           return [...updatedList, ...missingVehicles];
         });
@@ -740,16 +762,22 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         const remote = await SupabaseService.fetchAll();
         if (!isMounted) return;
 
-        // Se o Supabase já tem veículos, sincroniza preservando equipamentos e anexos locais
+        // Se o Supabase já tem veículos, sincroniza preservando equipamentos e anexos locais (sem re-incluir equipamentos excluídos)
         if (remote.vehicles.length > 0) {
           const enriched = remote.vehicles.map(enrichVehicleCargoProducts);
+          const deletedEqIds = getDeletedEquipmentIds();
           setVehicles(prev => {
             return enriched.map(remoteV => {
               const localV = prev.find(v => v.id === remoteV.id);
-              if (!localV) return remoteV;
+              if (!localV) {
+                return {
+                  ...remoteV,
+                  equipments: (remoteV.equipments || []).filter(e => !deletedEqIds.has(e.id)),
+                };
+              }
 
-              const remoteEqs = remoteV.equipments || [];
-              const localEqs = localV.equipments || [];
+              const remoteEqs = (remoteV.equipments || []).filter(e => !deletedEqIds.has(e.id));
+              const localEqs = (localV.equipments || []).filter(e => !deletedEqIds.has(e.id));
               const localEqMap = new Map(localEqs.map(e => [e.id, e]));
               const mergedEquipments: VehicleEquipment[] = remoteEqs.map(re => {
                 const le = localEqMap.get(re.id);
@@ -762,7 +790,7 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               });
               const seenEqIds = new Set(remoteEqs.map(e => e.id));
               localEqs.forEach(le => {
-                if (!seenEqIds.has(le.id)) {
+                if (!seenEqIds.has(le.id) && !deletedEqIds.has(le.id)) {
                   mergedEquipments.push(le);
                   seenEqIds.add(le.id);
                 }
@@ -815,7 +843,7 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                 ...remoteV,
                 documents: mergedDocs,
                 attachments: mergedAttachments,
-                equipments: mergedEquipments,
+                equipments: mergedEquipments.filter(e => !deletedEqIds.has(e.id)),
               };
             });
           });
@@ -847,11 +875,12 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         if (!isMounted) return;
         if ((event === 'INSERT' || event === 'UPDATE') && payload.new) {
           const veh = enrichVehicleCargoProducts(toFrontendVehicle(payload.new));
+          const deletedEqIds = getDeletedEquipmentIds();
           setVehicles(prev => {
             const localV = prev.find(v => v.id === veh.id);
             if (localV) {
-              const remoteEqs = veh.equipments || [];
-              const localEqs = localV.equipments || [];
+              const remoteEqs = (veh.equipments || []).filter(e => !deletedEqIds.has(e.id));
+              const localEqs = (localV.equipments || []).filter(e => !deletedEqIds.has(e.id));
               const localEqMap = new Map(localEqs.map(e => [e.id, e]));
               const mergedEquipments: VehicleEquipment[] = remoteEqs.map(re => {
                 const le = localEqMap.get(re.id);
@@ -864,7 +893,7 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               });
               const seenEqIds = new Set(remoteEqs.map(e => e.id));
               localEqs.forEach(le => {
-                if (!seenEqIds.has(le.id)) {
+                if (!seenEqIds.has(le.id) && !deletedEqIds.has(le.id)) {
                   mergedEquipments.push(le);
                   seenEqIds.add(le.id);
                 }
@@ -916,11 +945,17 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                 ...veh,
                 documents: mergedDocs,
                 attachments: mergedAttachments,
-                equipments: mergedEquipments,
+                equipments: mergedEquipments.filter(e => !deletedEqIds.has(e.id)),
               };
               return prev.map(v => v.id === veh.id ? mergedVehicle : v);
             }
-            return [veh, ...prev];
+            return [
+              {
+                ...veh,
+                equipments: (veh.equipments || []).filter(e => !deletedEqIds.has(e.id)),
+              },
+              ...prev
+            ];
           });
         } else if (event === 'DELETE' && payload.old) {
           setVehicles(prev => prev.filter(v => v.id !== payload.old.id));
@@ -1487,6 +1522,22 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       console.warn('Operação negada: Apenas Administrador pode excluir equipamentos.');
       return;
     }
+
+    // Persist deleted equipment ID so example / cached equipment NEVER returns on refresh
+    addDeletedEquipmentId(equipmentId);
+
+    // Immediately clean up equipment from dedicated localStorage backup
+    try {
+      const eqBackupStr = localStorage.getItem('gestao_frotas_equipments_backup');
+      if (eqBackupStr) {
+        const eqBackup = JSON.parse(eqBackupStr);
+        if (eqBackup[vehicleId]) {
+          eqBackup[vehicleId] = (eqBackup[vehicleId] || []).filter((e: any) => e.id !== equipmentId);
+          localStorage.setItem('gestao_frotas_equipments_backup', JSON.stringify(eqBackup));
+        }
+      }
+    } catch {}
+
     setVehicles(prev => {
       const updated = prev.map(v => {
         if (v.id !== vehicleId) return v;
