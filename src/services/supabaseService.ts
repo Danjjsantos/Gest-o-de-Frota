@@ -32,6 +32,67 @@ export const REQUIRED_TABLES: Array<{ name: string; label: string; description: 
 ];
 
 // =========================================================================
+// SUPABASE QUOTA & RESTRICTION CIRCUIT BREAKER
+// =========================================================================
+
+export function isQuotaOrRestrictionError(err: any): boolean {
+  if (!err) return false;
+  const msg = typeof err === 'string' ? err : (err.message || err.error_description || JSON.stringify(err));
+  return (
+    msg.includes('exceed_egress_quota') ||
+    msg.includes('spend caps') ||
+    msg.includes('upgrade their plan') ||
+    msg.includes('restricted due to the following violations') ||
+    msg.includes('Quota exceeded') ||
+    msg.includes('quota') ||
+    msg.includes('bandwidth limit')
+  );
+}
+
+let projectRestrictedReason: string | null = null;
+let lastRestrictionCheck = 0;
+
+export function setProjectRestricted(reason: string) {
+  projectRestrictedReason = reason;
+  lastRestrictionCheck = Date.now();
+  try {
+    sessionStorage.setItem('supabase_project_restricted', reason);
+  } catch {}
+}
+
+export function isProjectRestricted(): boolean {
+  if (projectRestrictedReason) {
+    // Tenta reavaliar após 5 minutos para o caso de o proprietário ter feito upgrade ou renovado o plano
+    if (Date.now() - lastRestrictionCheck > 5 * 60 * 1000) {
+      projectRestrictedReason = null;
+      try { sessionStorage.removeItem('supabase_project_restricted'); } catch {}
+      return false;
+    }
+    return true;
+  }
+  try {
+    const saved = sessionStorage.getItem('supabase_project_restricted');
+    if (saved) {
+      projectRestrictedReason = saved;
+      return true;
+    }
+  } catch {}
+  return false;
+}
+
+export function clearProjectRestricted() {
+  projectRestrictedReason = null;
+  lastRestrictionCheck = 0;
+  try {
+    sessionStorage.removeItem('supabase_project_restricted');
+  } catch {}
+}
+
+export function getProjectRestrictedMessage(): string | null {
+  return projectRestrictedReason;
+}
+
+// =========================================================================
 // HELPER CONVERTERS & SANITIZERS (Crucial for PostgreSQL type safety)
 // =========================================================================
 
@@ -91,16 +152,48 @@ export function parseNumber(val: any, defaultVal: number | null = null): number 
   return isNaN(num) ? defaultVal : num;
 }
 
-// Convert Frontend Vehicle to Database Row
+// Convert Frontend Vehicle to Database Row (with payload egress optimization)
 export function toDatabaseVehicle(v: Vehicle): Record<string, any> {
   const vacNum = parseNumber(v.vacuumValue);
   const vacDate = parseDateToIso(v.vacuumDate);
 
   // Preserve vacuumReadings inside documents JSON if available
-  const docs = { ...(v.documents || {}) };
-  if (v.vacuumReadings && v.vacuumReadings.length > 0) {
-    (docs as any)._vacuumReadings = v.vacuumReadings;
+  const docs: Record<string, any> = {};
+  if (v.documents) {
+    Object.entries(v.documents).forEach(([k, d]: [string, any]) => {
+      if (!d) return;
+      // Strip massive base64 dataUrl from JSON columns to prevent egress quota exhaustion
+      if (d.fileUrl && d.fileUrl.length > 500 && d.fileUrl.startsWith('data:')) {
+        const { fileUrl, ...rest } = d;
+        docs[k] = { ...rest, hasFile: true };
+      } else {
+        docs[k] = d;
+      }
+    });
   }
+  if (v.vacuumReadings && v.vacuumReadings.length > 0) {
+    docs._vacuumReadings = v.vacuumReadings;
+  }
+
+  // Sanitize attachments in JSON column (files are safely persisted in IndexedDB and vehicle_attachments)
+  const sanitizedAttachments = (Array.isArray(v.attachments) ? v.attachments : []).map(att => {
+    if (att.dataUrl && att.dataUrl.length > 500 && att.dataUrl.startsWith('data:')) {
+      const { dataUrl, ...rest } = att;
+      return { ...rest, hasFile: true };
+    }
+    return att;
+  });
+
+  const sanitizedEquipments = (Array.isArray(v.equipments) ? v.equipments : []).map(eq => {
+    let cleanEq = { ...eq };
+    if (cleanEq.dataUrl && cleanEq.dataUrl.length > 500 && cleanEq.dataUrl.startsWith('data:')) {
+      cleanEq.dataUrl = undefined;
+    }
+    if (cleanEq.fileUrl && cleanEq.fileUrl.length > 500 && cleanEq.fileUrl.startsWith('data:')) {
+      cleanEq.fileUrl = undefined;
+    }
+    return cleanEq;
+  });
 
   return {
     id: v.id,
@@ -125,8 +218,8 @@ export function toDatabaseVehicle(v: Vehicle): Record<string, any> {
     additional_info: v.additionalInfo || null,
     notes: v.notes || null,
     documents: docs,
-    attachments: Array.isArray(v.attachments) ? v.attachments : [],
-    equipments: Array.isArray(v.equipments) ? v.equipments : [],
+    attachments: sanitizedAttachments,
+    equipments: sanitizedEquipments,
     updated_at: new Date().toISOString()
   };
 }
@@ -361,6 +454,18 @@ export function toDatabaseServiceOrderAttachment(serviceOrderId: string, att: an
 // =========================================================================
 
 export class SupabaseService {
+  static isRestricted(): boolean {
+    return isProjectRestricted();
+  }
+
+  static getRestrictionMessage(): string | null {
+    return getProjectRestrictedMessage();
+  }
+
+  static clearRestriction(): void {
+    clearProjectRestricted();
+  }
+
   /**
    * Testa a conexão com o Supabase e afere latência
    */
@@ -375,12 +480,27 @@ export class SupabaseService {
       };
     }
 
+    if (isProjectRestricted()) {
+      return {
+        success: false,
+        message: 'Cota de transferência mensal (egress quota) excedida no Supabase. O sistema está operando com persistência local segura (IndexedDB).'
+      };
+    }
+
     const start = performance.now();
     try {
       const { error } = await client.from('vehicles').select('id', { count: 'exact', head: true });
       const pingMs = Math.round(performance.now() - start);
 
       if (error && error.code !== 'PGRST116' && error.code !== 'PGRST205') {
+        if (isQuotaOrRestrictionError(error)) {
+          setProjectRestricted(error.message);
+          return {
+            success: false,
+            message: 'Cota de transferência mensal (egress quota) excedida no Supabase. O sistema está operando com persistência local segura.',
+            pingMs
+          };
+        }
         if (error.message.includes('fetch failed') || error.message.includes('Failed to fetch')) {
           return {
             success: false,
@@ -390,12 +510,21 @@ export class SupabaseService {
         }
       }
 
+      clearProjectRestricted();
       return {
         success: true,
         message: `Conectado com sucesso ao Supabase (${config.url})`,
         pingMs
       };
     } catch (err: any) {
+      if (isQuotaOrRestrictionError(err)) {
+        setProjectRestricted(err.message);
+        return {
+          success: false,
+          message: 'Cota de transferência mensal (egress quota) excedida no Supabase.',
+          pingMs: Math.round(performance.now() - start)
+        };
+      }
       return {
         success: false,
         message: err.message || 'Erro inesperado ao conectar ao Supabase',
@@ -425,6 +554,20 @@ export class SupabaseService {
       };
     }
 
+    if (isProjectRestricted()) {
+      return {
+        connected: false,
+        url: config.url,
+        message: 'Cota de transferência mensal (egress quota) excedida no Supabase. Sistema em modo local seguro.',
+        tables: REQUIRED_TABLES.map(t => ({
+          ...t,
+          exists: false,
+          count: 0,
+          error: 'Cota de transferência (egress quota) atingida'
+        }))
+      };
+    }
+
     const start = performance.now();
     let isConnected = true;
     let message = 'Conexão ativa com Supabase';
@@ -438,6 +581,18 @@ export class SupabaseService {
           .select('*', { count: 'exact', head: true });
 
         if (error) {
+          if (isQuotaOrRestrictionError(error)) {
+            setProjectRestricted(error.message);
+            isConnected = false;
+            message = 'Cota de transferência mensal (egress quota) excedida no Supabase.';
+            tablesInfo.push({
+              ...t,
+              exists: false,
+              count: 0,
+              error: 'Cota de transferência (egress quota) atingida'
+            });
+            break;
+          }
           if (error.code === 'PGRST205') {
             tablesInfo.push({
               ...t,
@@ -461,6 +616,18 @@ export class SupabaseService {
           });
         }
       } catch (err: any) {
+        if (isQuotaOrRestrictionError(err)) {
+          setProjectRestricted(err.message);
+          isConnected = false;
+          message = 'Cota de transferência mensal (egress quota) excedida no Supabase.';
+          tablesInfo.push({
+            ...t,
+            exists: false,
+            count: 0,
+            error: 'Cota de transferência (egress quota) atingida'
+          });
+          break;
+        }
         isConnected = false;
         tablesInfo.push({
           ...t,
@@ -495,27 +662,53 @@ export class SupabaseService {
     const client = getSupabaseClient();
     if (!client) throw new Error('Cliente Supabase não configurado');
 
+    if (isProjectRestricted()) {
+      throw new Error('Supabase temporariamente restrito (cota mensal excedida). Operando em modo local.');
+    }
+
     // 1. Fetch Users
     const { data: usersData, error: usersErr } = await client.from('users').select('*');
-    if (usersErr && usersErr.code !== 'PGRST205') {
-      console.warn('Aviso ao buscar usuários do Supabase:', usersErr.message);
+    if (usersErr) {
+      if (isQuotaOrRestrictionError(usersErr)) {
+        setProjectRestricted(usersErr.message);
+        throw new Error(`Cota do Supabase excedida: ${usersErr.message}`);
+      }
+      if (usersErr.code !== 'PGRST205') {
+        throw new Error(`Erro ao buscar usuários: ${usersErr.message}`);
+      }
     }
 
     // 2. Fetch Vehicles
     const { data: vehiclesData, error: vehErr } = await client.from('vehicles').select('*');
-    if (vehErr && vehErr.code !== 'PGRST205') {
-      console.warn('Aviso ao buscar veículos do Supabase:', vehErr.message);
+    if (vehErr) {
+      if (isQuotaOrRestrictionError(vehErr)) {
+        setProjectRestricted(vehErr.message);
+        throw new Error(`Cota do Supabase excedida: ${vehErr.message}`);
+      }
+      if (vehErr.code !== 'PGRST205') {
+        throw new Error(`Erro ao buscar veículos: ${vehErr.message}`);
+      }
     }
 
     // 3. Fetch Service Orders
     const { data: soData, error: soErr } = await client.from('service_orders').select('*');
-    if (soErr && soErr.code !== 'PGRST205') {
-      console.warn('Aviso ao buscar ordens de serviço do Supabase:', soErr.message);
+    if (soErr) {
+      if (isQuotaOrRestrictionError(soErr)) {
+        setProjectRestricted(soErr.message);
+        throw new Error(`Cota do Supabase excedida: ${soErr.message}`);
+      }
+      if (soErr.code !== 'PGRST205') {
+        throw new Error(`Erro ao buscar ordens de serviço: ${soErr.message}`);
+      }
     }
 
     // 4. Fetch Notifications
     const { data: notifData, error: notifErr } = await client.from('notifications').select('*');
     if (notifErr && notifErr.code !== 'PGRST205') {
+      if (isQuotaOrRestrictionError(notifErr)) {
+        setProjectRestricted(notifErr.message);
+        throw new Error(`Cota do Supabase excedida: ${notifErr.message}`);
+      }
       console.warn('Aviso ao buscar notificações do Supabase:', notifErr.message);
     }
 
@@ -771,6 +964,19 @@ export class SupabaseService {
     const client = getSupabaseClient();
     if (!client) throw new Error('Cliente Supabase não configurado');
 
+    if (isProjectRestricted()) {
+      return {
+        usersCount: 0,
+        vehiclesCount: 0,
+        ordersCount: 0,
+        notifsCount: 0,
+        documentsCount: 0,
+        attachmentsCount: 0,
+        equipmentsCount: 0,
+        errors: ['Cota de transferência mensal do Supabase atingida. Os dados estão preservados com segurança na persistência local (IndexedDB/LocalStorage).']
+      };
+    }
+
     const errors: string[] = [];
     let usersCount = 0;
     let vehiclesCount = 0;
@@ -786,129 +992,165 @@ export class SupabaseService {
       if (usersRows.length > 0) {
         const { error: userErr } = await client.from('users').upsert(usersRows, { onConflict: 'id' });
         if (userErr) {
-          console.error('Erro ao salvar usuários no Supabase:', userErr);
+          if (isQuotaOrRestrictionError(userErr)) {
+            setProjectRestricted(userErr.message);
+            console.warn('Aviso de cota do Supabase ao salvar usuários:', userErr.message);
+          } else {
+            console.warn('Aviso ao salvar usuários no Supabase:', userErr.message);
+          }
           errors.push(`Usuários: ${userErr.message}`);
         } else {
           usersCount = usersRows.length;
         }
       }
     } catch (err: any) {
+      if (isQuotaOrRestrictionError(err)) setProjectRestricted(err.message);
       errors.push(`Usuários erro: ${err.message}`);
     }
 
     // 2. Upsert Vehicles (Garante que veículos existam para as foreign keys das OSs e subtabelas)
     try {
-      const vehicleRows = vehicles.map(toDatabaseVehicle);
-      if (vehicleRows.length > 0) {
-        const { error: vehErr } = await client.from('vehicles').upsert(vehicleRows, { onConflict: 'id' });
-        if (vehErr) {
-          console.error('Erro ao salvar veículos no Supabase:', vehErr);
-          errors.push(`Veículos: ${vehErr.message}`);
-        } else {
-          vehiclesCount = vehicleRows.length;
+      if (!isProjectRestricted()) {
+        const vehicleRows = vehicles.map(toDatabaseVehicle);
+        if (vehicleRows.length > 0) {
+          const { error: vehErr } = await client.from('vehicles').upsert(vehicleRows, { onConflict: 'id' });
+          if (vehErr) {
+            if (isQuotaOrRestrictionError(vehErr)) {
+              setProjectRestricted(vehErr.message);
+              console.warn('Aviso de cota do Supabase ao salvar veículos:', vehErr.message);
+            } else {
+              console.warn('Aviso ao salvar veículos no Supabase:', vehErr.message);
+            }
+            errors.push(`Veículos: ${vehErr.message}`);
+          } else {
+            vehiclesCount = vehicleRows.length;
+          }
         }
       }
     } catch (err: any) {
+      if (isQuotaOrRestrictionError(err)) setProjectRestricted(err.message);
       errors.push(`Veículos erro: ${err.message}`);
     }
 
     // 3. Upsert Vehicle Documents
     try {
-      const docRows: any[] = [];
-      vehicles.forEach(v => {
-        if (v.documents) {
-          Object.entries(v.documents).forEach(([docType, doc]) => {
-            if (doc && (doc as any).expiryDate) {
-              const row = toDatabaseVehicleDocument(v.id, docType, doc);
-              if (row) docRows.push(row);
-            }
-          });
-        }
-      });
-      if (docRows.length > 0) {
-        const { error: docErr } = await client.from('vehicle_documents').upsert(docRows, { onConflict: 'id' });
-        if (docErr && docErr.code !== 'PGRST205') {
-          errors.push(`Documentos: ${docErr.message}`);
-        } else {
-          documentsCount = docRows.length;
+      if (!isProjectRestricted()) {
+        const docRows: any[] = [];
+        vehicles.forEach(v => {
+          if (v.documents) {
+            Object.entries(v.documents).forEach(([docType, doc]) => {
+              if (doc && (doc as any).expiryDate) {
+                const row = toDatabaseVehicleDocument(v.id, docType, doc);
+                if (row) docRows.push(row);
+              }
+            });
+          }
+        });
+        if (docRows.length > 0) {
+          const { error: docErr } = await client.from('vehicle_documents').upsert(docRows, { onConflict: 'id' });
+          if (docErr && docErr.code !== 'PGRST205') {
+            if (isQuotaOrRestrictionError(docErr)) setProjectRestricted(docErr.message);
+            errors.push(`Documentos: ${docErr.message}`);
+          } else {
+            documentsCount = docRows.length;
+          }
         }
       }
     } catch (err: any) {
+      if (isQuotaOrRestrictionError(err)) setProjectRestricted(err.message);
       errors.push(`Documentos erro: ${err.message}`);
     }
 
     // 4. Upsert Vehicle Attachments
     try {
-      const attRows: any[] = [];
-      vehicles.forEach(v => {
-        if (Array.isArray(v.attachments)) {
-          v.attachments.forEach(att => {
-            attRows.push(toDatabaseVehicleAttachment(v.id, att));
-          });
-        }
-      });
-      if (attRows.length > 0) {
-        const { error: attErr } = await client.from('vehicle_attachments').upsert(attRows, { onConflict: 'id' });
-        if (attErr && attErr.code !== 'PGRST205') {
-          errors.push(`Anexos de veículos: ${attErr.message}`);
-        } else {
-          attachmentsCount = attRows.length;
+      if (!isProjectRestricted()) {
+        const attRows: any[] = [];
+        vehicles.forEach(v => {
+          if (Array.isArray(v.attachments)) {
+            v.attachments.forEach(att => {
+              attRows.push(toDatabaseVehicleAttachment(v.id, att));
+            });
+          }
+        });
+        if (attRows.length > 0) {
+          const { error: attErr } = await client.from('vehicle_attachments').upsert(attRows, { onConflict: 'id' });
+          if (attErr && attErr.code !== 'PGRST205') {
+            if (isQuotaOrRestrictionError(attErr)) setProjectRestricted(attErr.message);
+            errors.push(`Anexos de veículos: ${attErr.message}`);
+          } else {
+            attachmentsCount = attRows.length;
+          }
         }
       }
     } catch (err: any) {
+      if (isQuotaOrRestrictionError(err)) setProjectRestricted(err.message);
       errors.push(`Anexos veículos erro: ${err.message}`);
     }
 
     // 5. Upsert Vehicle Equipments
     try {
-      const eqRows: any[] = [];
-      vehicles.forEach(v => {
-        if (Array.isArray(v.equipments)) {
-          v.equipments.forEach(eq => {
-            eqRows.push(toDatabaseVehicleEquipment(v.id, eq));
-          });
-        }
-      });
-      if (eqRows.length > 0) {
-        const { error: eqErr } = await client.from('vehicle_equipments').upsert(eqRows, { onConflict: 'id' });
-        if (eqErr && eqErr.code !== 'PGRST205') {
-          errors.push(`Equipamentos: ${eqErr.message}`);
-        } else {
-          equipmentsCount = eqRows.length;
+      if (!isProjectRestricted()) {
+        const eqRows: any[] = [];
+        vehicles.forEach(v => {
+          if (Array.isArray(v.equipments)) {
+            v.equipments.forEach(eq => {
+              eqRows.push(toDatabaseVehicleEquipment(v.id, eq));
+            });
+          }
+        });
+        if (eqRows.length > 0) {
+          const { error: eqErr } = await client.from('vehicle_equipments').upsert(eqRows, { onConflict: 'id' });
+          if (eqErr && eqErr.code !== 'PGRST205') {
+            if (isQuotaOrRestrictionError(eqErr)) setProjectRestricted(eqErr.message);
+            errors.push(`Equipamentos: ${eqErr.message}`);
+          } else {
+            equipmentsCount = eqRows.length;
+          }
         }
       }
     } catch (err: any) {
+      if (isQuotaOrRestrictionError(err)) setProjectRestricted(err.message);
       errors.push(`Equipamentos erro: ${err.message}`);
     }
 
     // 6. Upsert Service Orders (Após veículos estarem salvos)
     try {
-      const orderRows = serviceOrders.map(toDatabaseServiceOrder);
-      if (orderRows.length > 0) {
-        const { error: soErr } = await client.from('service_orders').upsert(orderRows, { onConflict: 'id' });
-        if (soErr) {
-          console.error('Erro ao salvar OSs no Supabase:', soErr);
-          errors.push(`Ordens de Serviço: ${soErr.message}`);
-        } else {
-          ordersCount = orderRows.length;
+      if (!isProjectRestricted()) {
+        const orderRows = serviceOrders.map(toDatabaseServiceOrder);
+        if (orderRows.length > 0) {
+          const { error: soErr } = await client.from('service_orders').upsert(orderRows, { onConflict: 'id' });
+          if (soErr) {
+            if (isQuotaOrRestrictionError(soErr)) {
+              setProjectRestricted(soErr.message);
+              console.warn('Aviso de cota do Supabase ao salvar OSs:', soErr.message);
+            } else {
+              console.warn('Aviso ao salvar OSs no Supabase:', soErr.message);
+            }
+            errors.push(`Ordens de Serviço: ${soErr.message}`);
+          } else {
+            ordersCount = orderRows.length;
+          }
         }
       }
     } catch (err: any) {
+      if (isQuotaOrRestrictionError(err)) setProjectRestricted(err.message);
       errors.push(`Ordens de Serviço erro: ${err.message}`);
     }
 
     // 7. Upsert Service Order Attachments
     try {
-      const soAttRows: any[] = [];
-      serviceOrders.forEach(so => {
-        if (Array.isArray(so.attachments)) {
-          so.attachments.forEach(att => {
-            soAttRows.push(toDatabaseServiceOrderAttachment(so.id, att));
-          });
+      if (!isProjectRestricted()) {
+        const soAttRows: any[] = [];
+        serviceOrders.forEach(so => {
+          if (Array.isArray(so.attachments)) {
+            so.attachments.forEach(att => {
+              soAttRows.push(toDatabaseServiceOrderAttachment(so.id, att));
+            });
+          }
+        });
+        if (soAttRows.length > 0) {
+          await client.from('service_order_attachments').upsert(soAttRows, { onConflict: 'id' });
         }
-      });
-      if (soAttRows.length > 0) {
-        await client.from('service_order_attachments').upsert(soAttRows, { onConflict: 'id' });
       }
     } catch (err: any) {
       console.debug('Service order attachments push notice:', err?.message);
@@ -916,33 +1158,37 @@ export class SupabaseService {
 
     // 8. Upsert Notifications
     try {
-      const notifRows = notifications.map(n => ({
-        id: n.id,
-        type: n.type,
-        title: n.title,
-        message: n.message,
-        vehicle_id: n.vehicleId || null,
-        fleet_number: n.fleetNumber || null,
-        plate: n.plate || null,
-        os_code: n.osCode || null,
-        doc_type: n.docType || null,
-        equipment_description: n.equipmentDescription || null,
-        equipment_tag: n.equipmentTag || null,
-        days_remaining: parseNumber(n.daysRemaining),
-        days_diff: parseNumber(n.daysDiff),
-        read: Boolean(n.read),
-        created_at: new Date().toISOString()
-      }));
+      if (!isProjectRestricted()) {
+        const notifRows = notifications.map(n => ({
+          id: n.id,
+          type: n.type,
+          title: n.title,
+          message: n.message,
+          vehicle_id: n.vehicleId || null,
+          fleet_number: n.fleetNumber || null,
+          plate: n.plate || null,
+          os_code: n.osCode || null,
+          doc_type: n.docType || null,
+          equipment_description: n.equipmentDescription || null,
+          equipment_tag: n.equipmentTag || null,
+          days_remaining: parseNumber(n.daysRemaining),
+          days_diff: parseNumber(n.daysDiff),
+          read: Boolean(n.read),
+          created_at: new Date().toISOString()
+        }));
 
-      if (notifRows.length > 0) {
-        const { error: notifErr } = await client.from('notifications').upsert(notifRows, { onConflict: 'id' });
-        if (notifErr) {
-          errors.push(`Notificações: ${notifErr.message}`);
-        } else {
-          notifsCount = notifRows.length;
+        if (notifRows.length > 0) {
+          const { error: notifErr } = await client.from('notifications').upsert(notifRows, { onConflict: 'id' });
+          if (notifErr) {
+            if (isQuotaOrRestrictionError(notifErr)) setProjectRestricted(notifErr.message);
+            errors.push(`Notificações: ${notifErr.message}`);
+          } else {
+            notifsCount = notifRows.length;
+          }
         }
       }
     } catch (err: any) {
+      if (isQuotaOrRestrictionError(err)) setProjectRestricted(err.message);
       errors.push(`Notificações erro: ${err.message}`);
     }
 
@@ -962,6 +1208,7 @@ export class SupabaseService {
    * Salvar ou atualizar veículo no Supabase (com todos os documentos, anexos e equipamentos)
    */
   static async upsertVehicle(v: Vehicle): Promise<boolean> {
+    if (isProjectRestricted()) return false;
     const client = getSupabaseClient();
     if (!client) return false;
 
@@ -969,36 +1216,43 @@ export class SupabaseService {
       const row = toDatabaseVehicle(v);
       const { error } = await client.from('vehicles').upsert(row, { onConflict: 'id' });
       if (error) {
-        console.error('Falha ao salvar veículo no Supabase:', error.message, row);
+        if (isQuotaOrRestrictionError(error)) {
+          setProjectRestricted(error.message);
+          console.warn('Aviso de cota ao salvar veículo no Supabase:', error.message);
+        } else {
+          console.warn('Falha ao salvar veículo no Supabase:', error.message);
+        }
         return false;
       }
 
       // Sincronizar também nas tabelas filhas dedicadas
       try {
-        // Documentos
-        if (v.documents) {
-          const docRows: any[] = [];
-          Object.entries(v.documents).forEach(([docType, doc]) => {
-            if (doc && ((doc as any).expiryDate || (doc as any).fileUrl)) {
-              const dRow = toDatabaseVehicleDocument(v.id, docType, doc);
-              if (dRow) docRows.push(dRow);
+        if (!isProjectRestricted()) {
+          // Documentos
+          if (v.documents) {
+            const docRows: any[] = [];
+            Object.entries(v.documents).forEach(([docType, doc]) => {
+              if (doc && ((doc as any).expiryDate || (doc as any).fileUrl)) {
+                const dRow = toDatabaseVehicleDocument(v.id, docType, doc);
+                if (dRow) docRows.push(dRow);
+              }
+            });
+            if (docRows.length > 0) {
+              await client.from('vehicle_documents').upsert(docRows, { onConflict: 'id' });
             }
-          });
-          if (docRows.length > 0) {
-            await client.from('vehicle_documents').upsert(docRows, { onConflict: 'id' });
           }
-        }
 
-        // Anexos
-        if (Array.isArray(v.attachments) && v.attachments.length > 0) {
-          const attRows = v.attachments.map(att => toDatabaseVehicleAttachment(v.id, att));
-          await client.from('vehicle_attachments').upsert(attRows, { onConflict: 'id' });
-        }
+          // Anexos
+          if (Array.isArray(v.attachments) && v.attachments.length > 0) {
+            const attRows = v.attachments.map(att => toDatabaseVehicleAttachment(v.id, att));
+            await client.from('vehicle_attachments').upsert(attRows, { onConflict: 'id' });
+          }
 
-        // Equipamentos
-        if (Array.isArray(v.equipments) && v.equipments.length > 0) {
-          const eqRows = v.equipments.map(eq => toDatabaseVehicleEquipment(v.id, eq));
-          await client.from('vehicle_equipments').upsert(eqRows, { onConflict: 'id' });
+          // Equipamentos
+          if (Array.isArray(v.equipments) && v.equipments.length > 0) {
+            const eqRows = v.equipments.map(eq => toDatabaseVehicleEquipment(v.id, eq));
+            await client.from('vehicle_equipments').upsert(eqRows, { onConflict: 'id' });
+          }
         }
       } catch (subErr) {
         console.debug('Aviso subtabelas ao sincronizar veículo:', subErr);
@@ -1006,7 +1260,12 @@ export class SupabaseService {
 
       return true;
     } catch (err: any) {
-      console.error('Erro ao salvar veículo no Supabase:', err.message);
+      if (isQuotaOrRestrictionError(err)) {
+        setProjectRestricted(err.message);
+        console.warn('Aviso de cota do Supabase ao salvar veículo:', err.message);
+      } else {
+        console.warn('Aviso ao salvar veículo no Supabase:', err.message);
+      }
       return false;
     }
   }
@@ -1015,13 +1274,15 @@ export class SupabaseService {
    * Salvar anexo diretamente no Supabase na tabela vehicle_attachments e atualizar a frota
    */
   static async saveVehicleAttachment(vehicleId: string, att: any): Promise<boolean> {
+    if (isProjectRestricted()) return false;
     const client = getSupabaseClient();
     if (!client) return false;
     try {
       const attRow = toDatabaseVehicleAttachment(vehicleId, att);
       const { error: attErr } = await client.from('vehicle_attachments').upsert(attRow, { onConflict: 'id' });
       if (attErr) {
-        console.error('Erro ao salvar em vehicle_attachments:', attErr.message);
+        if (isQuotaOrRestrictionError(attErr)) setProjectRestricted(attErr.message);
+        console.warn('Aviso ao salvar em vehicle_attachments:', attErr.message);
       }
 
       // Atualizar também o campo JSON attachments do veículo
@@ -1034,7 +1295,8 @@ export class SupabaseService {
       }
       return true;
     } catch (err: any) {
-      console.error('Erro ao salvar anexo de veículo no Supabase:', err.message);
+      if (isQuotaOrRestrictionError(err)) setProjectRestricted(err.message);
+      console.warn('Aviso ao salvar anexo de veículo no Supabase:', err.message);
       return false;
     }
   }
@@ -1043,6 +1305,7 @@ export class SupabaseService {
    * Excluir anexo de veículo no Supabase
    */
   static async deleteVehicleAttachment(vehicleId: string, attachmentId: string): Promise<boolean> {
+    if (isProjectRestricted()) return false;
     const client = getSupabaseClient();
     if (!client) return false;
     try {
@@ -1055,7 +1318,8 @@ export class SupabaseService {
       }
       return true;
     } catch (err: any) {
-      console.error('Erro ao excluir anexo de veículo:', err.message);
+      if (isQuotaOrRestrictionError(err)) setProjectRestricted(err.message);
+      console.warn('Aviso ao excluir anexo de veículo:', err.message);
       return false;
     }
   }
@@ -1064,6 +1328,7 @@ export class SupabaseService {
    * Salvar documento de veículo no Supabase imediatamente
    */
   static async saveVehicleDocument(vehicleId: string, docType: string, doc: any): Promise<boolean> {
+    if (isProjectRestricted()) return false;
     const client = getSupabaseClient();
     if (!client) return false;
     try {
@@ -1079,7 +1344,8 @@ export class SupabaseService {
       }
       return true;
     } catch (err: any) {
-      console.error('Erro ao salvar documento no Supabase:', err.message);
+      if (isQuotaOrRestrictionError(err)) setProjectRestricted(err.message);
+      console.warn('Aviso ao salvar documento no Supabase:', err.message);
       return false;
     }
   }
@@ -1088,6 +1354,7 @@ export class SupabaseService {
    * Deletar veículo no Supabase
    */
   static async deleteVehicle(id: string): Promise<boolean> {
+    if (isProjectRestricted()) return false;
     const client = getSupabaseClient();
     if (!client) return false;
 
@@ -1100,10 +1367,14 @@ export class SupabaseService {
       ]);
 
       const { error } = await client.from('vehicles').delete().eq('id', id);
-      if (error) console.error('Erro ao deletar veículo no Supabase:', error.message);
+      if (error) {
+        if (isQuotaOrRestrictionError(error)) setProjectRestricted(error.message);
+        console.warn('Aviso ao deletar veículo no Supabase:', error.message);
+      }
       return !error;
     } catch (err: any) {
-      console.error('Erro ao deletar veículo:', err.message);
+      if (isQuotaOrRestrictionError(err)) setProjectRestricted(err.message);
+      console.warn('Aviso ao deletar veículo:', err.message);
       return false;
     }
   }
@@ -1112,6 +1383,7 @@ export class SupabaseService {
    * Salvar ou atualizar Ordem de Serviço (Garante que o veículo exista para evitar erro de FK)
    */
   static async upsertServiceOrder(so: ServiceOrder, vehicleFallback?: Vehicle): Promise<boolean> {
+    if (isProjectRestricted()) return false;
     const client = getSupabaseClient();
     if (!client) return false;
 
@@ -1124,7 +1396,12 @@ export class SupabaseService {
       const row = toDatabaseServiceOrder(so);
       const { error } = await client.from('service_orders').upsert(row, { onConflict: 'id' });
       if (error) {
-        console.error('Falha ao salvar OS no Supabase:', error.message, row);
+        if (isQuotaOrRestrictionError(error)) {
+          setProjectRestricted(error.message);
+          console.warn('Aviso de cota ao salvar OS no Supabase:', error.message);
+        } else {
+          console.warn('Falha ao salvar OS no Supabase:', error.message);
+        }
         return false;
       }
 
@@ -1140,7 +1417,12 @@ export class SupabaseService {
 
       return true;
     } catch (err: any) {
-      console.error('Erro ao salvar OS no Supabase:', err.message);
+      if (isQuotaOrRestrictionError(err)) {
+        setProjectRestricted(err.message);
+        console.warn('Aviso de cota ao salvar OS no Supabase:', err.message);
+      } else {
+        console.warn('Aviso ao salvar OS no Supabase:', err.message);
+      }
       return false;
     }
   }
@@ -1149,16 +1431,21 @@ export class SupabaseService {
    * Deletar Ordem de Serviço
    */
   static async deleteServiceOrder(id: string): Promise<boolean> {
+    if (isProjectRestricted()) return false;
     const client = getSupabaseClient();
     if (!client) return false;
 
     try {
       await client.from('service_order_attachments').delete().eq('service_order_id', id);
       const { error } = await client.from('service_orders').delete().eq('id', id);
-      if (error) console.error('Erro ao deletar OS no Supabase:', error.message);
+      if (error) {
+        if (isQuotaOrRestrictionError(error)) setProjectRestricted(error.message);
+        console.warn('Aviso ao deletar OS no Supabase:', error.message);
+      }
       return !error;
     } catch (err: any) {
-      console.error('Erro ao deletar OS:', err.message);
+      if (isQuotaOrRestrictionError(err)) setProjectRestricted(err.message);
+      console.warn('Aviso ao deletar OS:', err.message);
       return false;
     }
   }
@@ -1167,6 +1454,7 @@ export class SupabaseService {
    * Salvar ou atualizar Usuário
    */
   static async upsertUser(u: User): Promise<boolean> {
+    if (isProjectRestricted()) return false;
     const client = getSupabaseClient();
     if (!client) return false;
 
@@ -1174,12 +1462,22 @@ export class SupabaseService {
       const row = toDatabaseUser(u);
       const { error } = await client.from('users').upsert(row, { onConflict: 'id' });
       if (error) {
-        console.error('Falha ao salvar usuário no Supabase:', error.message);
+        if (isQuotaOrRestrictionError(error)) {
+          setProjectRestricted(error.message);
+          console.warn('Aviso de cota ao salvar usuário no Supabase:', error.message);
+        } else {
+          console.warn('Falha ao salvar usuário no Supabase:', error.message);
+        }
         return false;
       }
       return true;
     } catch (err: any) {
-      console.error('Erro ao salvar usuário no Supabase:', err.message);
+      if (isQuotaOrRestrictionError(err)) {
+        setProjectRestricted(err.message);
+        console.warn('Aviso de cota ao salvar usuário no Supabase:', err.message);
+      } else {
+        console.warn('Aviso ao salvar usuário no Supabase:', err.message);
+      }
       return false;
     }
   }
@@ -1188,15 +1486,20 @@ export class SupabaseService {
    * Deletar Usuário
    */
   static async deleteUser(id: string): Promise<boolean> {
+    if (isProjectRestricted()) return false;
     const client = getSupabaseClient();
     if (!client) return false;
 
     try {
       const { error } = await client.from('users').delete().eq('id', id);
-      if (error) console.error('Erro ao deletar usuário no Supabase:', error.message);
+      if (error) {
+        if (isQuotaOrRestrictionError(error)) setProjectRestricted(error.message);
+        console.warn('Aviso ao deletar usuário no Supabase:', error.message);
+      }
       return !error;
     } catch (err: any) {
-      console.error('Erro ao deletar usuário:', err.message);
+      if (isQuotaOrRestrictionError(err)) setProjectRestricted(err.message);
+      console.warn('Aviso ao deletar usuário:', err.message);
       return false;
     }
   }
@@ -1210,6 +1513,7 @@ export class SupabaseService {
     onServiceOrderChange?: (event: 'INSERT' | 'UPDATE' | 'DELETE', payload: any) => void;
     onUserChange?: (event: 'INSERT' | 'UPDATE' | 'DELETE', payload: any) => void;
   }): () => void {
+    if (isProjectRestricted()) return () => {};
     const client = getSupabaseClient();
     if (!client) return () => {};
 

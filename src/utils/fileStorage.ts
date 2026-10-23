@@ -24,17 +24,38 @@ function openDB(): Promise<IDBDatabase> {
   });
 }
 
+const getDeletedIds = (key: string): Set<string> => {
+  try {
+    const saved = localStorage.getItem(key);
+    return saved ? new Set(JSON.parse(saved)) : new Set();
+  } catch {
+    return new Set();
+  }
+};
+
 export async function saveVehiclesToIdb(vehicles: any[]): Promise<void> {
   try {
+    const deletedVehIds = getDeletedIds('gestao_frotas_deleted_vehicle_ids');
+    const deletedAttIds = getDeletedIds('gestao_frotas_deleted_attachment_ids');
+    const deletedEqIds = getDeletedIds('gestao_frotas_deleted_equipment_ids');
+
+    const cleanVehicles = vehicles
+      .filter(v => !deletedVehIds.has(v.id))
+      .map(v => ({
+        ...v,
+        attachments: (v.attachments || []).filter((a: any) => !deletedAttIds.has(a.id)),
+        equipments: (v.equipments || []).filter((e: any) => !deletedEqIds.has(e.id)),
+      }));
+
     const db = await openDB();
     return new Promise((resolve, reject) => {
       const tx = db.transaction(STORE_NAME, 'readwrite');
       const store = tx.objectStore(STORE_NAME);
-      store.put(vehicles, 'vehicles');
+      store.put(cleanVehicles, 'vehicles');
 
-      // Also save dedicated attachments map so attachments can never be lost
+      // Save dedicated attachments map only for non-deleted attachments
       const attMap: Record<string, any[]> = {};
-      vehicles.forEach(v => {
+      cleanVehicles.forEach(v => {
         if (Array.isArray(v.attachments) && v.attachments.length > 0) {
           attMap[v.id] = v.attachments;
         }
@@ -51,6 +72,10 @@ export async function saveVehiclesToIdb(vehicles: any[]): Promise<void> {
 
 export async function loadVehiclesFromIdb(): Promise<any[] | null> {
   try {
+    const deletedVehIds = getDeletedIds('gestao_frotas_deleted_vehicle_ids');
+    const deletedAttIds = getDeletedIds('gestao_frotas_deleted_attachment_ids');
+    const deletedEqIds = getDeletedIds('gestao_frotas_deleted_equipment_ids');
+
     const db = await openDB();
     return new Promise((resolve) => {
       const tx = db.transaction(STORE_NAME, 'readonly');
@@ -59,41 +84,38 @@ export async function loadVehiclesFromIdb(): Promise<any[] | null> {
       const reqAtts = store.get('attachments_map');
 
       tx.oncomplete = () => {
-        const vehicles = Array.isArray(reqVehicles.result) ? reqVehicles.result : null;
+        const rawVehicles = Array.isArray(reqVehicles.result) ? reqVehicles.result : null;
         const attsMap = reqAtts.result || {};
 
-        if (!vehicles) {
+        if (!rawVehicles) {
           resolve(null);
           return;
         }
 
-        // Merge attachments from attsMap if vehicle's attachments were missing or stripped
+        // Filter out deleted vehicles
+        const vehicles = rawVehicles.filter(v => !deletedVehIds.has(v.id));
+
+        // Enrich existing attachments with missing dataUrls from attsMap, never resurrect deleted ones
         const enriched = vehicles.map(v => {
-          const backedUpAtts = attsMap[v.id];
-          if (backedUpAtts && Array.isArray(backedUpAtts) && backedUpAtts.length > 0) {
-            const merged: any[] = [];
-            const seen = new Set<string>();
+          const backedUpAtts = attsMap[v.id] || [];
+          const currentAtts = (v.attachments || []).filter((a: any) => !deletedAttIds.has(a.id));
 
-            (v.attachments || []).forEach((a: any) => {
-              const b = backedUpAtts.find((ba: any) => ba.id === a.id);
-              merged.push({
-                ...a,
-                ...(b || {}),
-                dataUrl: (a.dataUrl && a.dataUrl.length > 0) ? a.dataUrl : (b?.dataUrl || ''),
-              });
-              seen.add(a.id);
-            });
+          const enrichedAtts = currentAtts.map((a: any) => {
+            const b = backedUpAtts.find((ba: any) => ba.id === a.id);
+            return {
+              ...a,
+              ...(b || {}),
+              dataUrl: (a.dataUrl && a.dataUrl.length > 0) ? a.dataUrl : (b?.dataUrl || ''),
+            };
+          });
 
-            backedUpAtts.forEach((ba: any) => {
-              if (!seen.has(ba.id)) {
-                merged.push(ba);
-                seen.add(ba.id);
-              }
-            });
+          const currentEqs = (v.equipments || []).filter((e: any) => !deletedEqIds.has(e.id));
 
-            return { ...v, attachments: merged };
-          }
-          return v;
+          return {
+            ...v,
+            attachments: enrichedAtts,
+            equipments: currentEqs,
+          };
         });
 
         resolve(enriched);

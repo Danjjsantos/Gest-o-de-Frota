@@ -29,7 +29,7 @@ interface SupabaseSyncModalProps {
 type TabType = 'status' | 'sql' | 'sync' | 'config';
 
 export const SupabaseSyncModal: React.FC<SupabaseSyncModalProps> = ({ isOpen, onClose }) => {
-  const { vehicles, serviceOrders, users, notifications, setVehicles, setServiceOrders, setUsers } = useFleet();
+  const { vehicles, serviceOrders, users, notifications, setVehicles, setServiceOrders, setUsers, syncSupabaseNow } = useFleet();
 
   const [activeTab, setActiveTab] = useState<TabType>('status');
   const [loading, setLoading] = useState(false);
@@ -118,28 +118,15 @@ export const SupabaseSyncModal: React.FC<SupabaseSyncModalProps> = ({ isOpen, on
   const handlePullData = async () => {
     setSyncLoading(true);
     setSyncSuccessMessage(null);
-    addLog(`Buscando dados remotos do Supabase...`);
+    addLog(`Buscando dados remotos do Supabase com preservação de dados locais e exclusões...`);
 
     try {
-      const data = await SupabaseService.fetchAll();
-
-      if (data.vehicles.length === 0 && data.serviceOrders.length === 0 && data.users.length === 0) {
-        addLog(`Nenhum dado encontrado no Supabase para carregar.`);
-        setSyncSuccessMessage('O banco de dados Supabase ainda está vazio. Utilize o botão "Enviar Dados Locais" para popular.');
+      const res = await syncSupabaseNow();
+      if (res.success) {
+        addLog(res.message);
+        setSyncSuccessMessage(res.message);
       } else {
-        if (data.vehicles.length > 0) {
-          setVehicles(data.vehicles);
-          addLog(`Importados ${data.vehicles.length} veículos.`);
-        }
-        if (data.serviceOrders.length > 0) {
-          setServiceOrders(data.serviceOrders);
-          addLog(`Importadas ${data.serviceOrders.length} ordens de serviço.`);
-        }
-        if (data.users.length > 0) {
-          setUsers(data.users);
-          addLog(`Importados ${data.users.length} usuários.`);
-        }
-        setSyncSuccessMessage(`Dados atualizados do Supabase com sucesso! (${data.vehicles.length} veículos, ${data.serviceOrders.length} OSs)`);
+        addLog(`Erro ao carregar dados: ${res.message}`);
       }
       await loadHealthStatus();
     } catch (err: any) {

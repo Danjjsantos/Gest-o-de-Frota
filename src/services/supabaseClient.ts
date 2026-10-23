@@ -89,6 +89,12 @@ export function saveSupabaseConfig(url: string, anonKey: string): void {
     } else {
       localStorage.removeItem('fleet_supabase_anon_key');
     }
+
+    try {
+      sessionStorage.removeItem('supabase_project_restricted');
+    } catch {}
   }
   cachedClient = null;
+  lastUsedUrl = '';
+  lastUsedKey = '';
 }

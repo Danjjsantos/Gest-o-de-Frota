@@ -252,8 +252,8 @@ const sanitizeUserAtribuicoes = (user: User): User => ({
   ),
 });
 
-// Persistent tracking of deleted equipment IDs so example / cached equipments never return upon page refresh
-const getDeletedEquipmentIds = (): Set<string> => {
+// Persistent tracking of deleted items so deleted vehicles, equipments and attachments never return upon page refresh
+export const getDeletedEquipmentIds = (): Set<string> => {
   try {
     const saved = localStorage.getItem('gestao_frotas_deleted_equipment_ids');
     return saved ? new Set(JSON.parse(saved)) : new Set();
@@ -262,11 +262,62 @@ const getDeletedEquipmentIds = (): Set<string> => {
   }
 };
 
-const addDeletedEquipmentId = (id: string) => {
+export const addDeletedEquipmentId = (id: string) => {
   try {
     const deleted = getDeletedEquipmentIds();
     deleted.add(id);
     localStorage.setItem('gestao_frotas_deleted_equipment_ids', JSON.stringify(Array.from(deleted)));
+  } catch {}
+};
+
+export const getDeletedVehicleIds = (): Set<string> => {
+  try {
+    const saved = localStorage.getItem('gestao_frotas_deleted_vehicle_ids');
+    return saved ? new Set(JSON.parse(saved)) : new Set();
+  } catch {
+    return new Set();
+  }
+};
+
+export const addDeletedVehicleId = (id: string) => {
+  try {
+    const deleted = getDeletedVehicleIds();
+    deleted.add(id);
+    localStorage.setItem('gestao_frotas_deleted_vehicle_ids', JSON.stringify(Array.from(deleted)));
+  } catch {}
+};
+
+export const getDeletedAttachmentIds = (): Set<string> => {
+  try {
+    const saved = localStorage.getItem('gestao_frotas_deleted_attachment_ids');
+    return saved ? new Set(JSON.parse(saved)) : new Set();
+  } catch {
+    return new Set();
+  }
+};
+
+export const addDeletedAttachmentId = (id: string) => {
+  try {
+    const deleted = getDeletedAttachmentIds();
+    deleted.add(id);
+    localStorage.setItem('gestao_frotas_deleted_attachment_ids', JSON.stringify(Array.from(deleted)));
+  } catch {}
+};
+
+export const getDeletedServiceOrderIds = (): Set<string> => {
+  try {
+    const saved = localStorage.getItem('gestao_frotas_deleted_os_ids');
+    return saved ? new Set(JSON.parse(saved)) : new Set();
+  } catch {
+    return new Set();
+  }
+};
+
+export const addDeletedServiceOrderId = (id: string) => {
+  try {
+    const deleted = getDeletedServiceOrderIds();
+    deleted.add(id);
+    localStorage.setItem('gestao_frotas_deleted_os_ids', JSON.stringify(Array.from(deleted)));
   } catch {}
 };
 
@@ -342,7 +393,10 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   });
 
   const [vehicles, setVehicles] = useState<Vehicle[]>(() => {
+    const deletedVehIds = getDeletedVehicleIds();
     const deletedEqIds = getDeletedEquipmentIds();
+    const deletedAttIds = getDeletedAttachmentIds();
+
     let rawList: Vehicle[] = INITIAL_VEHICLES;
     try {
       const saved = localStorage.getItem('gestao_frotas_vehicles');
@@ -350,6 +404,9 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         rawList = JSON.parse(saved);
       }
     } catch {}
+
+    // Exclude any deleted vehicles so they never return upon refresh
+    rawList = rawList.filter(v => !deletedVehIds.has(v.id));
 
     // Check dedicated equipment backup to ensure no equipments are lost, but exclude deleted ones
     try {
@@ -371,10 +428,11 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       }
     } catch {}
 
-    // Exclude any deleted equipments so they never return upon refresh
+    // Exclude any deleted equipments and attachments so they never return upon refresh
     rawList = rawList.map(v => ({
       ...v,
-      equipments: (v.equipments || []).filter(e => !deletedEqIds.has(e.id))
+      equipments: (v.equipments || []).filter(e => !deletedEqIds.has(e.id)),
+      attachments: (v.attachments || []).filter(a => !deletedAttIds.has(a.id)),
     }));
 
     return rawList.map(enrichVehicleCargoProducts);
@@ -382,20 +440,23 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
 
   const [serviceOrders, setServiceOrders] = useState<ServiceOrder[]>(() => {
+    const deletedSoIds = getDeletedServiceOrderIds();
     const saved = localStorage.getItem('gestao_frotas_os');
     const rawList: ServiceOrder[] = saved ? JSON.parse(saved) : INITIAL_SERVICE_ORDERS;
-    return rawList.map(os => {
-      if (!os.directedUserIds || os.directedUserIds.length === 0) {
-        const auto = getAutoDirectedUsers(os.category, INITIAL_USERS);
-        return {
-          ...os,
-          directedUsers: auto.directedTargets,
-          directedUserIds: auto.allDirectedUsers.map(u => u.id),
-          directedRoles: Array.from(new Set(auto.allDirectedUsers.map(u => u.role))),
-        };
-      }
-      return os;
-    });
+    return rawList
+      .filter(os => !deletedSoIds.has(os.id))
+      .map(os => {
+        if (!os.directedUserIds || os.directedUserIds.length === 0) {
+          const auto = getAutoDirectedUsers(os.category, INITIAL_USERS);
+          return {
+            ...os,
+            directedUsers: auto.directedTargets,
+            directedUserIds: auto.allDirectedUsers.map(u => u.id),
+            directedRoles: Array.from(new Set(auto.allDirectedUsers.map(u => u.role))),
+          };
+        }
+        return os;
+      });
   });
 
   const [notifications, setNotifications] = useState<SystemNotification[]>(() => {
@@ -443,89 +504,85 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     loadVehiclesFromIdb().then(idbVehicles => {
       isIdbLoadedRef.current = true;
       if (isMounted && idbVehicles && idbVehicles.length > 0) {
+        const deletedVehIds = getDeletedVehicleIds();
         const deletedEqIds = getDeletedEquipmentIds();
+        const deletedAttIds = getDeletedAttachmentIds();
+
         setVehicles(prev => {
-          // Iterate over all prev vehicles and merge with IDB data
-          const updatedList = prev.map(local => {
-            const idbMatch = idbVehicles.find(iv => iv.id === local.id);
-            if (!idbMatch) {
-              return {
-                ...local,
-                equipments: (local.equipments || []).filter(e => !deletedEqIds.has(e.id))
-              };
-            }
-            const enriched = enrichVehicleCargoProducts(idbMatch);
-
-            // Merge equipments: retain existing ones without deleted, fill missing fileUrl/dataUrl
-            const mergedEqs = (local.equipments || [])
-              .filter(le => !deletedEqIds.has(le.id))
-              .map(le => {
-                const ie = (enriched.equipments || []).find(e => e.id === le.id);
+          // Iterate over all prev vehicles and merge with IDB data, filtering deleted items
+          const updatedList = prev
+            .filter(local => !deletedVehIds.has(local.id))
+            .map(local => {
+              const idbMatch = idbVehicles.find(iv => iv.id === local.id);
+              if (!idbMatch) {
                 return {
-                  ...le,
-                  fileUrl: le.fileUrl || ie?.fileUrl || undefined,
-                  dataUrl: le.dataUrl || ie?.dataUrl || undefined,
+                  ...local,
+                  equipments: (local.equipments || []).filter(e => !deletedEqIds.has(e.id)),
+                  attachments: (local.attachments || []).filter(a => !deletedAttIds.has(a.id)),
+                };
+              }
+              const enriched = enrichVehicleCargoProducts(idbMatch);
+
+              // Merge equipments: retain existing ones without deleted, fill missing fileUrl/dataUrl
+              const mergedEqs = (local.equipments || [])
+                .filter(le => !deletedEqIds.has(le.id))
+                .map(le => {
+                  const ie = (enriched.equipments || []).find(e => e.id === le.id);
+                  return {
+                    ...le,
+                    fileUrl: le.fileUrl || ie?.fileUrl || undefined,
+                    dataUrl: le.dataUrl || ie?.dataUrl || undefined,
+                  };
+                });
+
+              // Merge attachments: preserve dataUrl from IDB if local was stripped, NEVER resurrect deleted attachments
+              const idbAttMap = new Map((enriched.attachments || []).map(a => [a.id, a]));
+              const localAtts = (local.attachments || []).filter(la => !deletedAttIds.has(la.id));
+              const mergedAtts: VehicleAttachment[] = localAtts.map(la => {
+                const idbAtt = idbAttMap.get(la.id);
+                return {
+                  ...la,
+                  ...(idbAtt || {}),
+                  dataUrl: (la.dataUrl && la.dataUrl.length > 0) 
+                    ? la.dataUrl 
+                    : (idbAtt?.dataUrl || ''),
                 };
               });
 
-            // Merge attachments: preserve dataUrl from IDB if local was stripped
-            const idbAttMap = new Map((enriched.attachments || []).map(a => [a.id, a]));
-            const localAtts = local.attachments || [];
-            const mergedAtts: VehicleAttachment[] = [];
-            const processedIds = new Set<string>();
-
-            localAtts.forEach(la => {
-              const idbAtt = idbAttMap.get(la.id);
-              mergedAtts.push({
-                ...la,
-                ...(idbAtt || {}),
-                dataUrl: (la.dataUrl && la.dataUrl.length > 0) 
-                  ? la.dataUrl 
-                  : (idbAtt?.dataUrl || ''),
+              // Ensure document fileUrls from IDB are preserved if local was stripped
+              const mergedDocs: any = { ...(enriched.documents || {}), ...(local.documents || {}) };
+              Object.keys(mergedDocs).forEach(dk => {
+                const idbDoc = (enriched.documents as any)?.[dk];
+                const localDoc = (local.documents as any)?.[dk];
+                if (idbDoc?.fileUrl && (!localDoc?.fileUrl || localDoc.fileUrl.length === 0)) {
+                  mergedDocs[dk] = {
+                    ...mergedDocs[dk],
+                    fileUrl: idbDoc.fileUrl,
+                    fileName: mergedDocs[dk].fileName || idbDoc.fileName,
+                    fileType: mergedDocs[dk].fileType || idbDoc.fileType,
+                    fileSize: mergedDocs[dk].fileSize || idbDoc.fileSize,
+                  };
+                }
               });
-              processedIds.add(la.id);
+
+              return {
+                ...enriched,
+                ...local,
+                documents: mergedDocs,
+                attachments: mergedAtts,
+                equipments: mergedEqs,
+              };
             });
 
-            (enriched.attachments || []).forEach(ia => {
-              if (!processedIds.has(ia.id)) {
-                mergedAtts.push(ia);
-                processedIds.add(ia.id);
-              }
-            });
-
-            // Ensure document fileUrls from IDB are preserved if local was stripped
-            const mergedDocs: any = { ...(enriched.documents || {}), ...(local.documents || {}) };
-            Object.keys(mergedDocs).forEach(dk => {
-              const idbDoc = (enriched.documents as any)?.[dk];
-              const localDoc = (local.documents as any)?.[dk];
-              if (idbDoc?.fileUrl && (!localDoc?.fileUrl || localDoc.fileUrl.length === 0)) {
-                mergedDocs[dk] = {
-                  ...mergedDocs[dk],
-                  fileUrl: idbDoc.fileUrl,
-                  fileName: mergedDocs[dk].fileName || idbDoc.fileName,
-                  fileType: mergedDocs[dk].fileType || idbDoc.fileType,
-                  fileSize: mergedDocs[dk].fileSize || idbDoc.fileSize,
-                };
-              }
-            });
-
-            return {
-              ...enriched,
-              ...local,
-              documents: mergedDocs,
-              attachments: mergedAtts,
-              equipments: mergedEqs,
-            };
-          });
-
-          // Also bring in any vehicles that might be in IDB but not in prev
+          // Only bring in genuine saved vehicles from IDB that were never deleted and not in prev
           const prevIds = new Set(prev.map(p => p.id));
           const missingVehicles = idbVehicles
-            .filter(iv => !prevIds.has(iv.id))
+            .filter(iv => !prevIds.has(iv.id) && !deletedVehIds.has(iv.id))
             .map(enrichVehicleCargoProducts)
             .map(v => ({
               ...v,
-              equipments: (v.equipments || []).filter(e => !deletedEqIds.has(e.id))
+              equipments: (v.equipments || []).filter(e => !deletedEqIds.has(e.id)),
+              attachments: (v.attachments || []).filter(a => !deletedAttIds.has(a.id)),
             }));
 
           return [...updatedList, ...missingVehicles];
@@ -750,229 +807,299 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     });
   }, [vehicles, settings.daysThreshold]);
 
-  // Sincronização Bidirecional com o Supabase (Tempo Real via WebSockets + Heartbeat)
+  // =========================================================================
+  // SINCRONIZAÇÃO AUTOMÁTICA EM SEGUNDO PLANO COM O BANCO DE DADOS (SUPABASE)
+  // Sincronização inteligente bi-direcional sem necessidade de intervenção do usuário
+  // Preserva 100% dos dados e arquivos locais e garante que itens excluídos nunca retornem
+  // =========================================================================
+
+  const executeAutoSync = async (isInitial = false): Promise<{ success: boolean; message: string }> => {
+    const config = getSupabaseConfig();
+    if (!config.isConfigured || SupabaseService.isRestricted()) {
+      return { success: false, message: 'Supabase offline ou restrito. Operando com armazenamento local seguro.' };
+    }
+
+    try {
+      const remote = await SupabaseService.fetchAll();
+      const deletedVehIds = getDeletedVehicleIds();
+      const deletedEqIds = getDeletedEquipmentIds();
+      const deletedAttIds = getDeletedAttachmentIds();
+      const deletedSoIds = getDeletedServiceOrderIds();
+
+      // 1. Limpeza no banco remoto de itens que o usuário excluiu localmente
+      if (remote.vehicles && remote.vehicles.length > 0) {
+        remote.vehicles.forEach(rv => {
+          if (deletedVehIds.has(rv.id)) {
+            SupabaseService.deleteVehicle(rv.id).catch(() => {});
+          }
+        });
+      }
+      if (remote.serviceOrders && remote.serviceOrders.length > 0) {
+        remote.serviceOrders.forEach(rso => {
+          if (deletedSoIds.has(rso.id)) {
+            SupabaseService.deleteServiceOrder(rso.id).catch(() => {});
+          }
+        });
+      }
+
+      // 2. Mesclagem inteligente bi-direcional de Veículos
+      if (remote.vehicles && remote.vehicles.length > 0) {
+        const remoteClean = remote.vehicles
+          .filter(rv => !deletedVehIds.has(rv.id))
+          .map(enrichVehicleCargoProducts);
+
+        const remoteMap = new Map(remoteClean.map(rv => [rv.id, rv]));
+
+        setVehicles(prev => {
+          const localClean = prev.filter(local => !deletedVehIds.has(local.id));
+
+          // Atualizar veículos existentes ou manter os que foram adicionados localmente
+          const updated = localClean.map(local => {
+            const rm = remoteMap.get(local.id);
+            if (!rm) {
+              // Veículo criado localmente que ainda não existe no Supabase:
+              // Manter localmente E enviar automaticamente para o banco!
+              SupabaseService.upsertVehicle(local).catch(() => {});
+              return local;
+            }
+
+            // Mesclar equipamentos (preserva arquivos binários locais e respeita exclusões)
+            const localEqs = (local.equipments || []).filter(e => !deletedEqIds.has(e.id));
+            const remoteEqs = (rm.equipments || []).filter(e => !deletedEqIds.has(e.id));
+            const localEqMap = new Map(localEqs.map(e => [e.id, e]));
+            const mergedEqs: VehicleEquipment[] = remoteEqs.map((re): VehicleEquipment => {
+              const le = localEqMap.get(re.id);
+              return {
+                ...re,
+                ...(le || {}),
+                fileUrl: le?.fileUrl || re.fileUrl || undefined,
+                dataUrl: le?.dataUrl || re.dataUrl || undefined,
+              };
+            });
+            const seenEq = new Set(remoteEqs.map(e => e.id));
+            localEqs.forEach(le => {
+              if (!seenEq.has(le.id)) mergedEqs.push(le);
+            });
+
+            // Mesclar anexos (preserva dados binários locais e respeita exclusões)
+            const localAtts = (local.attachments || []).filter(a => !deletedAttIds.has(a.id));
+            const remoteAtts = (rm.attachments || []).filter(a => !deletedAttIds.has(a.id));
+            const localAttMap = new Map(localAtts.map(a => [a.id, a]));
+            const mergedAtts: VehicleAttachment[] = remoteAtts.map((ra): VehicleAttachment => {
+              const la = localAttMap.get(ra.id);
+              return {
+                ...ra,
+                ...(la || {}),
+                dataUrl: (la?.dataUrl && la.dataUrl.length > 0) ? la.dataUrl : (ra.dataUrl || ''),
+              };
+            });
+            const seenAtt = new Set(remoteAtts.map(a => a.id));
+            localAtts.forEach(la => {
+              if (!seenAtt.has(la.id)) mergedAtts.push(la);
+            });
+
+            // Mesclar documentos (preserva fileUrl local se remoto estiver vazio)
+            const mergedDocs: any = { ...(rm.documents || {}), ...(local.documents || {}) };
+            Object.keys(mergedDocs).forEach(dk => {
+              const localDoc = (local.documents as any)?.[dk];
+              const remoteDoc = (rm.documents as any)?.[dk];
+              if (localDoc?.fileUrl && (!remoteDoc?.fileUrl || remoteDoc.fileUrl.length === 0)) {
+                mergedDocs[dk] = {
+                  ...mergedDocs[dk],
+                  fileUrl: localDoc.fileUrl,
+                  fileName: localDoc.fileName || mergedDocs[dk]?.fileName,
+                  fileType: localDoc.fileType || mergedDocs[dk]?.fileType,
+                  fileSize: localDoc.fileSize || mergedDocs[dk]?.fileSize,
+                };
+              }
+            });
+
+            return {
+              ...rm,
+              ...local,
+              documents: mergedDocs,
+              attachments: mergedAtts,
+              equipments: mergedEqs,
+            };
+          });
+
+          // Novos veículos remotos que ainda não existiam localmente
+          const localIds = new Set(localClean.map(p => p.id));
+          const newRemoteVehicles = remoteClean
+            .filter(rv => !localIds.has(rv.id))
+            .map(rv => ({
+              ...rv,
+              equipments: (rv.equipments || []).filter(e => !deletedEqIds.has(e.id)),
+              attachments: (rv.attachments || []).filter(a => !deletedAttIds.has(a.id)),
+            }));
+
+          const finalVehicles = [...updated, ...newRemoteVehicles].filter(v => !deletedVehIds.has(v.id));
+          safeSaveVehiclesToLocalStorage(finalVehicles);
+          saveVehiclesToIdb(finalVehicles);
+          return finalVehicles;
+        });
+      } else if (isInitial && !SupabaseService.isRestricted()) {
+        // Se o banco estiver vazio na primeira execução, popula com os dados atuais
+        SupabaseService.pushAll(vehicles, serviceOrders, users, notifications).catch(() => {});
+      }
+
+      // 3. Mesclagem inteligente bi-direcional de Ordens de Serviço
+      if (remote.serviceOrders && remote.serviceOrders.length > 0) {
+        const remoteCleanSo = remote.serviceOrders.filter(so => !deletedSoIds.has(so.id));
+        const remoteSoMap = new Map(remoteCleanSo.map(so => [so.id, so]));
+
+        setServiceOrders(prev => {
+          const localClean = prev.filter(local => !deletedSoIds.has(local.id));
+          const updated = localClean.map(local => {
+            const rso = remoteSoMap.get(local.id);
+            if (!rso) {
+              // OS criada localmente: preservar e enviar automaticamente para o banco
+              SupabaseService.upsertServiceOrder(local).catch(() => {});
+              return local;
+            }
+            return {
+              ...rso,
+              ...local,
+              status: rso.status || local.status,
+              attachments: (rso.attachments && rso.attachments.length > 0) ? rso.attachments : local.attachments,
+            };
+          });
+
+          const localIds = new Set(localClean.map(o => o.id));
+          const newRemote = remoteCleanSo.filter(so => !localIds.has(so.id));
+          return [...updated, ...newRemote];
+        });
+      }
+
+      // 4. Mesclagem de Usuários
+      if (remote.users && remote.users.length > 0) {
+        const remoteUsers = remote.users.map(sanitizeUserAtribuicoes);
+        const remoteUserMap = new Map(remoteUsers.map(u => [u.id, u]));
+
+        setUsers(prev => {
+          const updated = prev.map(local => {
+            const ru = remoteUserMap.get(local.id);
+            return ru ? { ...local, ...ru } : local;
+          });
+          const localIds = new Set(prev.map(u => u.id));
+          const newUsers = remoteUsers.filter(u => !localIds.has(u.id));
+          return [...updated, ...newUsers];
+        });
+      }
+
+      return {
+        success: true,
+        message: `Sincronizado automaticamente com sucesso! (${remote.vehicles.length} veículos, ${remote.serviceOrders.length} OSs)`
+      };
+    } catch (err: any) {
+      console.debug('Aviso no sincronismo automático:', err?.message);
+      return {
+        success: false,
+        message: err?.message || 'Erro ao sincronizar com o banco de dados'
+      };
+    }
+  };
+
+  // Sincronização automática contínua em segundo plano
   useEffect(() => {
+    let isMounted = true;
     const config = getSupabaseConfig();
     if (!config.isConfigured) return;
 
-    let isMounted = true;
+    // 1. Carga inicial após breve pausa para garantir que o IndexedDB já carregou os arquivos completos locais
+    const initialTimer = setTimeout(() => {
+      if (isMounted) executeAutoSync(true);
+    }, 2500);
 
-    const syncFromRemote = async (isInitial = false) => {
-      try {
-        const remote = await SupabaseService.fetchAll();
-        if (!isMounted) return;
-
-        // Se o Supabase já tem veículos, sincroniza preservando equipamentos e anexos locais (sem re-incluir equipamentos excluídos)
-        if (remote.vehicles.length > 0) {
-          const enriched = remote.vehicles.map(enrichVehicleCargoProducts);
-          const deletedEqIds = getDeletedEquipmentIds();
-          setVehicles(prev => {
-            return enriched.map(remoteV => {
-              const localV = prev.find(v => v.id === remoteV.id);
-              if (!localV) {
-                return {
-                  ...remoteV,
-                  equipments: (remoteV.equipments || []).filter(e => !deletedEqIds.has(e.id)),
-                };
-              }
-
-              const remoteEqs = (remoteV.equipments || []).filter(e => !deletedEqIds.has(e.id));
-              const localEqs = (localV.equipments || []).filter(e => !deletedEqIds.has(e.id));
-              const localEqMap = new Map(localEqs.map(e => [e.id, e]));
-              const mergedEquipments: VehicleEquipment[] = remoteEqs.map(re => {
-                const le = localEqMap.get(re.id);
-                return {
-                  ...re,
-                  ...(le || {}),
-                  fileUrl: (le?.fileUrl && le.fileUrl.length > 0) ? le.fileUrl : (re.fileUrl || undefined),
-                  dataUrl: (le?.dataUrl && le.dataUrl.length > 0) ? le.dataUrl : (re.dataUrl || undefined),
-                };
-              });
-              const seenEqIds = new Set(remoteEqs.map(e => e.id));
-              localEqs.forEach(le => {
-                if (!seenEqIds.has(le.id) && !deletedEqIds.has(le.id)) {
-                  mergedEquipments.push(le);
-                  seenEqIds.add(le.id);
-                }
-              });
-
-              // Merge attachments: preserve non-empty dataUrl
-              const remoteAtts = remoteV.attachments || [];
-              const localAtts = localV.attachments || [];
-              const localAttMap = new Map(localAtts.map(a => [a.id, a]));
-              const mergedAttachments: VehicleAttachment[] = [];
-              const seenAttIds = new Set<string>();
-
-              remoteAtts.forEach(ra => {
-                const la = localAttMap.get(ra.id);
-                mergedAttachments.push({
-                  ...ra,
-                  ...(la || {}),
-                  dataUrl: (la?.dataUrl && la.dataUrl.length > 0) ? la.dataUrl : (ra.dataUrl || ''),
-                });
-                seenAttIds.add(ra.id);
-              });
-
-              localAtts.forEach(la => {
-                if (!seenAttIds.has(la.id)) {
-                  mergedAttachments.push(la);
-                  seenAttIds.add(la.id);
-                }
-              });
-
-              // Also preserve document files (fileUrl)
-              const mergedDocs: any = {
-                ...(localV.documents || {}),
-                ...(remoteV.documents || {})
-              };
-              ['CRLV', 'CIV', 'CIPP', 'Tacógrafo'].forEach(dtype => {
-                const localDoc = (localV.documents as any)?.[dtype];
-                const remoteDoc = (remoteV.documents as any)?.[dtype];
-                if (localDoc?.fileUrl && (!remoteDoc?.fileUrl || remoteDoc.fileUrl.length === 0)) {
-                  mergedDocs[dtype] = {
-                    ...(mergedDocs[dtype] || {}),
-                    fileUrl: localDoc.fileUrl,
-                    fileName: localDoc.fileName || mergedDocs[dtype]?.fileName,
-                    fileType: localDoc.fileType || mergedDocs[dtype]?.fileType,
-                    fileSize: localDoc.fileSize || mergedDocs[dtype]?.fileSize,
-                  };
-                }
-              });
-
-              return {
-                ...remoteV,
-                documents: mergedDocs,
-                attachments: mergedAttachments,
-                equipments: mergedEquipments.filter(e => !deletedEqIds.has(e.id)),
-              };
-            });
-          });
-        } else if (isInitial && vehicles.length > 0) {
-          // Se o banco estiver vazio na primeira execução, popula com os dados atuais
-          SupabaseService.pushAll(vehicles, serviceOrders, users, notifications).catch(err => {
-            console.debug('Background Supabase seed notice:', err?.message);
-          });
-        }
-
-        if (remote.serviceOrders.length > 0) {
-          setServiceOrders(remote.serviceOrders);
-        }
-        if (remote.users.length > 0) {
-          const sanitizedUsers = remote.users.map(sanitizeUserAtribuicoes);
-          setUsers(sanitizedUsers);
-        }
-      } catch (err: any) {
-        console.debug('Supabase sync notice:', err?.message);
-      }
-    };
-
-    // 1. Carga inicial
-    syncFromRemote(true);
-
-    // 2. Inscrição em Tempo Real (Supabase Realtime WebSockets)
+    // 2. Inscrição em tempo real (Supabase Realtime WebSockets)
     const unsubscribe = SupabaseService.subscribeToChanges({
       onVehicleChange: (event, payload) => {
         if (!isMounted) return;
+        const deletedVehIds = getDeletedVehicleIds();
+        const deletedEqIds = getDeletedEquipmentIds();
+        const deletedAttIds = getDeletedAttachmentIds();
+
         if ((event === 'INSERT' || event === 'UPDATE') && payload.new) {
           const veh = enrichVehicleCargoProducts(toFrontendVehicle(payload.new));
-          const deletedEqIds = getDeletedEquipmentIds();
+          if (deletedVehIds.has(veh.id)) {
+            SupabaseService.deleteVehicle(veh.id).catch(() => {});
+            return;
+          }
           setVehicles(prev => {
-            const localV = prev.find(v => v.id === veh.id);
-            if (localV) {
-              const remoteEqs = (veh.equipments || []).filter(e => !deletedEqIds.has(e.id));
-              const localEqs = (localV.equipments || []).filter(e => !deletedEqIds.has(e.id));
-              const localEqMap = new Map(localEqs.map(e => [e.id, e]));
-              const mergedEquipments: VehicleEquipment[] = remoteEqs.map(re => {
-                const le = localEqMap.get(re.id);
+            const exists = prev.some(v => v.id === veh.id);
+            if (exists) {
+              return prev.map(localV => {
+                if (localV.id !== veh.id) return localV;
+                // Preservar arquivos e anexos locais
+                const remoteEqs = (veh.equipments || []).filter(e => !deletedEqIds.has(e.id));
+                const localEqs = (localV.equipments || []).filter(e => !deletedEqIds.has(e.id));
+                const localEqMap = new Map(localEqs.map(e => [e.id, e]));
+                const mergedEquipments: VehicleEquipment[] = remoteEqs.map(re => {
+                  const le = localEqMap.get(re.id);
+                  return {
+                    ...re,
+                    ...(le || {}),
+                    fileUrl: le?.fileUrl || re.fileUrl || undefined,
+                    dataUrl: le?.dataUrl || re.dataUrl || undefined,
+                  };
+                });
+                const seenEq = new Set(remoteEqs.map(e => e.id));
+                localEqs.forEach(le => { if (!seenEq.has(le.id)) mergedEquipments.push(le); });
+
+                const remoteAtts = (veh.attachments || []).filter(a => !deletedAttIds.has(a.id));
+                const localAtts = (localV.attachments || []).filter(a => !deletedAttIds.has(a.id));
+                const localAttMap = new Map(localAtts.map(a => [a.id, a]));
+                const mergedAttachments: VehicleAttachment[] = remoteAtts.map(ra => {
+                  const la = localAttMap.get(ra.id);
+                  return {
+                    ...ra,
+                    ...(la || {}),
+                    dataUrl: (la?.dataUrl && la.dataUrl.length > 0) ? la.dataUrl : (ra.dataUrl || ''),
+                  };
+                });
+                const seenAtt = new Set(remoteAtts.map(a => a.id));
+                localAtts.forEach(la => { if (!seenAtt.has(la.id)) mergedAttachments.push(la); });
+
                 return {
-                  ...re,
-                  ...(le || {}),
-                  fileUrl: (le?.fileUrl && le.fileUrl.length > 0) ? le.fileUrl : (re.fileUrl || undefined),
-                  dataUrl: (le?.dataUrl && le.dataUrl.length > 0) ? le.dataUrl : (re.dataUrl || undefined),
+                  ...veh,
+                  ...localV,
+                  equipments: mergedEquipments,
+                  attachments: mergedAttachments,
                 };
               });
-              const seenEqIds = new Set(remoteEqs.map(e => e.id));
-              localEqs.forEach(le => {
-                if (!seenEqIds.has(le.id) && !deletedEqIds.has(le.id)) {
-                  mergedEquipments.push(le);
-                  seenEqIds.add(le.id);
-                }
-              });
-
-              const remoteAtts = veh.attachments || [];
-              const localAtts = localV.attachments || [];
-              const localAttMap = new Map(localAtts.map(a => [a.id, a]));
-              const mergedAttachments: VehicleAttachment[] = [];
-              const seenAttIds = new Set<string>();
-
-              remoteAtts.forEach(ra => {
-                const la = localAttMap.get(ra.id);
-                mergedAttachments.push({
-                  ...ra,
-                  ...(la || {}),
-                  dataUrl: (la?.dataUrl && la.dataUrl.length > 0) ? la.dataUrl : (ra.dataUrl || ''),
-                });
-                seenAttIds.add(ra.id);
-              });
-
-              localAtts.forEach(la => {
-                if (!seenAttIds.has(la.id)) {
-                  mergedAttachments.push(la);
-                  seenAttIds.add(la.id);
-                }
-              });
-
-              const mergedDocs: any = {
-                ...(localV.documents || {}),
-                ...(veh.documents || {})
-              };
-              ['CRLV', 'CIV', 'CIPP', 'Tacógrafo'].forEach(dtype => {
-                const localDoc = (localV.documents as any)?.[dtype];
-                const remoteDoc = (veh.documents as any)?.[dtype];
-                if (localDoc?.fileUrl && (!remoteDoc?.fileUrl || remoteDoc.fileUrl.length === 0)) {
-                  mergedDocs[dtype] = {
-                    ...(mergedDocs[dtype] || {}),
-                    fileUrl: localDoc.fileUrl,
-                    fileName: localDoc.fileName || mergedDocs[dtype]?.fileName,
-                    fileType: localDoc.fileType || mergedDocs[dtype]?.fileType,
-                    fileSize: localDoc.fileSize || mergedDocs[dtype]?.fileSize,
-                  };
-                }
-              });
-
-              const mergedVehicle: Vehicle = {
-                ...localV,
-                ...veh,
-                documents: mergedDocs,
-                attachments: mergedAttachments,
-                equipments: mergedEquipments.filter(e => !deletedEqIds.has(e.id)),
-              };
-              return prev.map(v => v.id === veh.id ? mergedVehicle : v);
             }
             return [
               {
                 ...veh,
                 equipments: (veh.equipments || []).filter(e => !deletedEqIds.has(e.id)),
+                attachments: (veh.attachments || []).filter(a => !deletedAttIds.has(a.id)),
               },
               ...prev
             ];
           });
         } else if (event === 'DELETE' && payload.old) {
+          addDeletedVehicleId(payload.old.id);
           setVehicles(prev => prev.filter(v => v.id !== payload.old.id));
         }
       },
       onServiceOrderChange: (event, payload) => {
         if (!isMounted) return;
+        const deletedSoIds = getDeletedServiceOrderIds();
         if ((event === 'INSERT' || event === 'UPDATE') && payload.new) {
           const so = toFrontendServiceOrder(payload.new);
+          if (deletedSoIds.has(so.id)) {
+            SupabaseService.deleteServiceOrder(so.id).catch(() => {});
+            return;
+          }
           setServiceOrders(prev => {
             const exists = prev.some(o => o.id === so.id);
             if (exists) {
-              return prev.map(o => o.id === so.id ? so : o);
+              return prev.map(o => o.id === so.id ? { ...o, ...so } : o);
             }
             return [so, ...prev];
           });
         } else if (event === 'DELETE' && payload.old) {
+          addDeletedServiceOrderId(payload.old.id);
           setServiceOrders(prev => prev.filter(o => o.id !== payload.old.id));
         }
       },
@@ -983,7 +1110,7 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           setUsers(prev => {
             const exists = prev.some(user => user.id === u.id);
             if (exists) {
-              return prev.map(user => user.id === u.id ? u : user);
+              return prev.map(user => user.id === u.id ? { ...user, ...u } : user);
             }
             return [u, ...prev];
           });
@@ -993,41 +1120,35 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       }
     });
 
-    // 3. Heartbeat periódico a cada 20 segundos e ao focar a aba
-    const interval = setInterval(() => syncFromRemote(false), 20000);
-    const handleFocus = () => syncFromRemote(false);
+    // 3. Heartbeat periódico automático a cada 25 segundos
+    const interval = setInterval(() => {
+      if (isMounted) executeAutoSync(false);
+    }, 25000);
+
+    // 4. Sincronização automática ao alternar abas ou focar a janela
+    const handleFocus = () => {
+      if (isMounted) executeAutoSync(false);
+    };
     window.addEventListener('focus', handleFocus);
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible' && isMounted) {
+        executeAutoSync(false);
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
 
     return () => {
       isMounted = false;
-      unsubscribe();
+      clearTimeout(initialTimer);
       clearInterval(interval);
+      unsubscribe();
       window.removeEventListener('focus', handleFocus);
+      document.removeEventListener('visibilitychange', handleVisibility);
     };
   }, []);
 
   const syncSupabaseNow = async (): Promise<{ success: boolean; message: string }> => {
-    try {
-      const remote = await SupabaseService.fetchAll();
-      if (remote.vehicles.length > 0) {
-        setVehicles(remote.vehicles.map(enrichVehicleCargoProducts));
-      }
-      if (remote.serviceOrders.length > 0) {
-        setServiceOrders(remote.serviceOrders);
-      }
-      if (remote.users.length > 0) {
-        setUsers(remote.users.map(sanitizeUserAtribuicoes));
-      }
-      return {
-        success: true,
-        message: `Sincronizado com sucesso! (${remote.vehicles.length} veículos, ${remote.serviceOrders.length} OSs, ${remote.users.length} usuários)`
-      };
-    } catch (err: any) {
-      return {
-        success: false,
-        message: err?.message || 'Erro ao sincronizar com o Supabase'
-      };
-    }
+    return executeAutoSync(false);
   };
 
   const login = (identifier: string, password?: string, skipPasswordCheck = false): { success: boolean; error?: string } => {
@@ -1140,7 +1261,7 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         return sanitizeUserAtribuicoes({ ...u, ...updates });
       });
       const target = updated.find(u => u.id === id);
-      if (target) {
+      if (target && !SupabaseService.isRestricted()) {
         SupabaseService.upsertUser(target).catch(err => {
           console.debug('Supabase update user notice:', err?.message);
         });
@@ -1158,9 +1279,11 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       return;
     }
     setUsers(prev => prev.filter(u => u.id !== id));
-    SupabaseService.deleteUser(id).catch(err => {
-      console.debug('Supabase delete user notice:', err?.message);
-    });
+    if (!SupabaseService.isRestricted()) {
+      SupabaseService.deleteUser(id).catch(err => {
+        console.debug('Supabase delete user notice:', err?.message);
+      });
+    }
   };
 
   const addVehicle = (vehicleData: Omit<Vehicle, 'id' | 'createdAt'>): Vehicle => {
@@ -1172,11 +1295,21 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       ...vehicleData,
       id: `veh-${Date.now()}`,
       createdAt: new Date().toISOString().split('T')[0],
+      equipments: vehicleData.equipments || [],
+      attachments: vehicleData.attachments || [],
+      documents: vehicleData.documents || ({} as any),
     };
-    setVehicles(prev => [newVehicle, ...prev]);
-    SupabaseService.upsertVehicle(newVehicle).catch(err => {
-      console.debug('Supabase add vehicle background notice:', err?.message);
+    setVehicles(prev => {
+      const updated = [newVehicle, ...prev];
+      safeSaveVehiclesToLocalStorage(updated);
+      saveVehiclesToIdb(updated);
+      return updated;
     });
+    if (!SupabaseService.isRestricted()) {
+      SupabaseService.upsertVehicle(newVehicle).catch(err => {
+        console.debug('Supabase add vehicle background notice:', err?.message);
+      });
+    }
     return newVehicle;
   };
 
@@ -1187,8 +1320,10 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
     setVehicles(prev => {
       const updated = prev.map(v => v.id === id ? { ...v, ...updates } : v);
+      safeSaveVehiclesToLocalStorage(updated);
+      saveVehiclesToIdb(updated);
       const target = updated.find(v => v.id === id);
-      if (target) {
+      if (target && !SupabaseService.isRestricted()) {
         SupabaseService.upsertVehicle(target).catch(err => {
           console.debug('Supabase update vehicle background notice:', err?.message);
         });
@@ -1202,13 +1337,24 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       console.warn('Operação negada: Apenas Administrador pode excluir veículos.');
       return;
     }
-    setVehicles(prev => prev.filter(v => v.id !== id));
-    SupabaseService.deleteVehicle(id).catch(err => {
-      console.debug('Supabase delete vehicle background notice:', err?.message);
+    // Track deleted vehicle ID permanently so it NEVER returns upon refresh or cache sync
+    addDeletedVehicleId(id);
+
+    setVehicles(prev => {
+      const updated = prev.filter(v => v.id !== id);
+      safeSaveVehiclesToLocalStorage(updated);
+      saveVehiclesToIdb(updated);
+      return updated;
     });
+    if (!SupabaseService.isRestricted()) {
+      SupabaseService.deleteVehicle(id).catch(err => {
+        console.debug('Supabase delete vehicle background notice:', err?.message);
+      });
+    }
   };
 
   const syncVehicleToSupabase = (vehicleId: string, updatedVehiclesList: Vehicle[]) => {
+    if (SupabaseService.isRestricted()) return;
     const target = updatedVehiclesList.find(v => v.id === vehicleId);
     if (target) {
       SupabaseService.upsertVehicle(target).catch(err => {
@@ -1332,14 +1478,14 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       return updated;
     });
 
-    if (createdAttachment) {
+    if (createdAttachment && !SupabaseService.isRestricted()) {
       SupabaseService.saveVehicleAttachment(vehicleId, createdAttachment).catch(err => {
-        console.error('Error auto-syncing doc attachment to Supabase:', err);
+        console.debug('Aviso ao sincronizar anexo com Supabase:', err?.message);
       });
     }
-    if (savedDoc) {
+    if (savedDoc && !SupabaseService.isRestricted()) {
       SupabaseService.saveVehicleDocument(vehicleId, docType, savedDoc).catch(err => {
-        console.error('Error auto-syncing doc to Supabase:', err);
+        console.debug('Aviso ao sincronizar documento com Supabase:', err?.message);
       });
     }
   };
@@ -1372,9 +1518,11 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     });
 
     // Auto-sync attachment immediately to Supabase
-    SupabaseService.saveVehicleAttachment(vehicleId, newAtt).catch(err => {
-      console.error('Error auto-saving attachment to Supabase:', err);
-    });
+    if (!SupabaseService.isRestricted()) {
+      SupabaseService.saveVehicleAttachment(vehicleId, newAtt).catch(err => {
+        console.debug('Aviso ao salvar anexo no Supabase:', err?.message);
+      });
+    }
   };
 
   const removeVehicleAttachment = (vehicleId: string, attachmentId: string) => {
@@ -1382,6 +1530,10 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       console.warn('Operação negada: Apenas Administrador pode remover anexos.');
       return;
     }
+
+    // Persist deleted attachment ID permanently so it NEVER returns from IDB or cache
+    addDeletedAttachmentId(attachmentId);
+
     setVehicles(prev => {
       const updated = prev.map(v => {
         if (v.id !== vehicleId) return v;
@@ -1396,9 +1548,11 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       return updated;
     });
 
-    SupabaseService.deleteVehicleAttachment(vehicleId, attachmentId).catch(err => {
-      console.error('Error auto-deleting attachment from Supabase:', err);
-    });
+    if (!SupabaseService.isRestricted()) {
+      SupabaseService.deleteVehicleAttachment(vehicleId, attachmentId).catch(err => {
+        console.debug('Aviso ao remover anexo do Supabase:', err?.message);
+      });
+    }
   };
 
   const deleteVehicleDocument = (vehicleId: string, docType: DocumentType) => {
@@ -1407,6 +1561,13 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       return;
     }
     setVehicles(prev => {
+      const targetVehicle = prev.find(v => v.id === vehicleId);
+      if (targetVehicle && targetVehicle.attachments) {
+        targetVehicle.attachments
+          .filter(a => a.category === docType)
+          .forEach(a => addDeletedAttachmentId(a.id));
+      }
+
       const updated = prev.map(v => {
         if (v.id !== vehicleId) return v;
         const updatedDocs = {
@@ -1702,9 +1863,11 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       category: newOS.category,
     });
 
-    SupabaseService.upsertServiceOrder(newOS, vehicle).catch(err => {
-      console.debug('Supabase open OS notice:', err?.message);
-    });
+    if (!SupabaseService.isRestricted()) {
+      SupabaseService.upsertServiceOrder(newOS, vehicle).catch(err => {
+        console.debug('Supabase open OS notice:', err?.message);
+      });
+    }
 
     return newOS;
   };
@@ -1793,7 +1956,7 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
       // Sincronizar imediatamente com o Supabase sem closure desatualizada
       const target = updatedList.find(o => o.id === id);
-      if (target) {
+      if (target && !SupabaseService.isRestricted()) {
         SupabaseService.upsertServiceOrder(target).catch(err => {
           console.debug('Supabase update status notice:', err?.message);
         });
@@ -1807,10 +1970,13 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     if (currentUser && currentUser.role !== 'Administrador') {
       throw new Error('Apenas o Administrador tem permissão para excluir ordens de serviço.');
     }
+    addDeletedServiceOrderId(id);
     setServiceOrders(prev => prev.filter(os => os.id !== id));
-    SupabaseService.deleteServiceOrder(id).catch(err => {
-      console.debug('Supabase delete OS background notice:', err?.message);
-    });
+    if (!SupabaseService.isRestricted()) {
+      SupabaseService.deleteServiceOrder(id).catch(err => {
+        console.debug('Supabase delete OS notice:', err?.message);
+      });
+    }
   };
 
   const markNotificationAsRead = (id: string) => {
