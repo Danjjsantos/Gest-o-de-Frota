@@ -72,6 +72,7 @@ interface FleetContextType {
   updateVehicle: (id: string, updates: Partial<Vehicle>) => void;
   deleteVehicle: (id: string) => void;
   deleteVehicleDocument: (vehicleId: string, docType: DocumentType) => void;
+  restoreVehicleDocument: (vehicleId: string, docType: DocumentType) => void;
   updateVehicleDocument: (vehicleId: string, docType: DocumentType, expiryDate: string, number?: string) => void;
   updateVehicleDocumentWithFile: (
     vehicleId: string, 
@@ -645,6 +646,7 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     currentVehicles.forEach(vehicle => {
       // 1. Vehicle Documents (CRLV, CIV, CIPP, Tacógrafo)
       standardDocTypes.forEach(dtype => {
+        if (vehicle.excludedDocuments?.includes(dtype)) return;
         const doc = vehicle.documents[dtype];
         if (doc && doc.expiryDate) {
           const diffDays = getDaysDifference(doc.expiryDate);
@@ -1390,7 +1392,8 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             status,
           }
         };
-        return { ...v, documents: updatedDocs };
+        const updatedExcluded = (v.excludedDocuments || []).filter(d => d !== docType);
+        return { ...v, documents: updatedDocs, excludedDocuments: updatedExcluded };
       });
       syncVehicleToSupabase(vehicleId, updated);
       return updated;
@@ -1470,7 +1473,8 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           updatedAttachments = [createdAttachment, ...updatedAttachments];
         }
 
-        return { ...v, documents: updatedDocs, attachments: updatedAttachments };
+        const updatedExcluded = (v.excludedDocuments || []).filter(d => d !== docType);
+        return { ...v, documents: updatedDocs, attachments: updatedAttachments, excludedDocuments: updatedExcluded };
       });
       safeSaveVehiclesToLocalStorage(updated);
       saveVehiclesToIdb(updated);
@@ -1576,10 +1580,42 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         };
         // Also remove any attachments matching this docType
         const updatedAttachments = (v.attachments || []).filter(a => a.category !== docType);
+        // Exclude this docType from vehicle so the row is completely removed from the fleet
+        const existingExcluded = v.excludedDocuments || [];
+        const updatedExcluded = Array.from(new Set([...existingExcluded, docType]));
+
         return {
           ...v,
           documents: updatedDocs,
           attachments: updatedAttachments,
+          excludedDocuments: updatedExcluded,
+        };
+      });
+      safeSaveVehiclesToLocalStorage(updated);
+      saveVehiclesToIdb(updated);
+      syncVehicleToSupabase(vehicleId, updated);
+      return updated;
+    });
+
+    if (!SupabaseService.isRestricted()) {
+      SupabaseService.deleteVehicleDocument(vehicleId, docType).catch(err => {
+        console.debug('Aviso ao remover documento do Supabase:', err?.message);
+      });
+    }
+  };
+
+  const restoreVehicleDocument = (vehicleId: string, docType: DocumentType) => {
+    if (currentUser && currentUser.role !== 'Administrador') {
+      console.warn('Operação negada: Apenas Administrador pode reativar documentos.');
+      return;
+    }
+    setVehicles(prev => {
+      const updated = prev.map(v => {
+        if (v.id !== vehicleId) return v;
+        const updatedExcluded = (v.excludedDocuments || []).filter(d => d !== docType);
+        return {
+          ...v,
+          excludedDocuments: updatedExcluded,
         };
       });
       safeSaveVehiclesToLocalStorage(updated);
@@ -2082,6 +2118,7 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   vehicles.forEach(vehicle => {
     // 1. Check vehicle official documents (CRLV, CIV, CIPP, Tacógrafo)
     docTypes.forEach(dtype => {
+      if (vehicle.excludedDocuments?.includes(dtype)) return;
       const doc = vehicle.documents[dtype];
       if (doc && doc.expiryDate) {
         totalRegisteredDocs++;
@@ -2392,6 +2429,7 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       updateVehicle,
       deleteVehicle,
       deleteVehicleDocument,
+      restoreVehicleDocument,
       updateVehicleDocument,
       updateVehicleDocumentWithFile,
       addVehicleAttachment,

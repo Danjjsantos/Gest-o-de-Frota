@@ -195,6 +195,10 @@ export function toDatabaseVehicle(v: Vehicle): Record<string, any> {
     return cleanEq;
   });
 
+  if (Array.isArray(v.excludedDocuments)) {
+    docs._excludedDocuments = v.excludedDocuments;
+  }
+
   return {
     id: v.id,
     fleet_number: v.fleetNumber || '0000',
@@ -253,6 +257,7 @@ export function toFrontendVehicle(row: any): Vehicle {
     additionalInfo: row.additional_info || undefined,
     notes: row.notes || undefined,
     documents: docs,
+    excludedDocuments: Array.isArray(docs._excludedDocuments) ? docs._excludedDocuments : (Array.isArray(row.excluded_documents) ? row.excluded_documents : undefined),
     attachments: Array.isArray(row.attachments) ? row.attachments : [],
     equipments: Array.isArray(row.equipments) ? row.equipments : [],
     createdAt: row.created_at || new Date().toISOString()
@@ -1346,6 +1351,29 @@ export class SupabaseService {
     } catch (err: any) {
       if (isQuotaOrRestrictionError(err)) setProjectRestricted(err.message);
       console.warn('Aviso ao salvar documento no Supabase:', err.message);
+      return false;
+    }
+  }
+
+  /**
+   * Excluir documento de veículo no Supabase
+   */
+  static async deleteVehicleDocument(vehicleId: string, docType: string): Promise<boolean> {
+    if (isProjectRestricted()) return false;
+    const client = getSupabaseClient();
+    if (!client) return false;
+    try {
+      await client.from('vehicle_documents').delete().eq('vehicle_id', vehicleId).eq('doc_type', docType);
+      const { data: vRow } = await client.from('vehicles').select('documents').eq('id', vehicleId).single();
+      if (vRow) {
+        const existingDocs = { ...(vRow.documents || {}) };
+        delete existingDocs[docType];
+        await client.from('vehicles').update({ documents: existingDocs, updated_at: new Date().toISOString() }).eq('id', vehicleId);
+      }
+      return true;
+    } catch (err: any) {
+      if (isQuotaOrRestrictionError(err)) setProjectRestricted(err.message);
+      console.warn('Aviso ao excluir documento de veículo no Supabase:', err.message);
       return false;
     }
   }

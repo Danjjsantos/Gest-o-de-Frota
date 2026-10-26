@@ -127,6 +127,7 @@ export interface Vehicle {
   characteristics?: string; // Características técnicas (capacidade, eixos, tara, PBT, engate, dimensões)
   additionalInfo?: string; // Informações adicionais (rastreador, telemetria, seguradora, contrato, restrições)
   documents: Record<DocumentType, VehicleDocument | null>;
+  excludedDocuments?: string[]; // Documentos dispensados ou excluídos pelo Administrador (ex: documentos não aplicáveis ao tipo de veículo)
   attachments?: VehicleAttachment[];
   equipments?: VehicleEquipment[];
   notes?: string;
