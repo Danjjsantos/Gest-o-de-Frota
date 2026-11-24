@@ -203,10 +203,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   </div>
                   <div className="truncate min-w-0">
                     <p className="text-xs font-semibold text-slate-200 truncate">
-                      {currentUser?.name || 'Daniel Santos'}
+                      {currentUser?.name || 'Usuário'}
                     </p>
                     <span className={`inline-block text-[9px] font-semibold px-1.5 py-0.2 rounded border ${getRoleColor(currentUser?.role)}`}>
-                      {currentUser?.role || 'Administrador'}
+                      {currentUser?.role || 'Operador'}
                     </span>
                   </div>
                 </div>

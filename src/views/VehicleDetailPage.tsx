@@ -501,7 +501,7 @@ export const VehicleDetailPage: React.FC<VehicleDetailPageProps> = ({
       );
     }
     const targetDate = new Date(nextCalDate);
-    const refDate = new Date('2026-09-25T12:00:00Z');
+    const refDate = new Date();
     const diffDays = Math.ceil((targetDate.getTime() - refDate.getTime()) / (1000 * 60 * 60 * 24));
 
     if (isNaN(diffDays)) {
@@ -1642,7 +1642,7 @@ export const VehicleDetailPage: React.FC<VehicleDetailPageProps> = ({
                 let status: 'valid' | 'expiring' | 'expired' | 'anexado' = 'anexado';
                 if (att.expiryDate) {
                   const targetDate = new Date(att.expiryDate);
-                  const refDate = new Date('2026-09-25T12:00:00Z');
+                  const refDate = new Date();
                   const diffDays = Math.ceil((targetDate.getTime() - refDate.getTime()) / (1000 * 60 * 60 * 24));
                   if (!isNaN(diffDays)) {
                     if (diffDays < 0) status = 'expired';

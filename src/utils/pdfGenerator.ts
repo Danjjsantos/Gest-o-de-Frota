@@ -372,7 +372,7 @@ export const generateDashboardPDF = (
     statusCode: 'valid' | 'expiring' | 'expired';
   }> = [];
 
-  const REFERENCE_DATE = new Date('2026-09-02T12:00:00Z');
+  const REFERENCE_DATE = new Date();
 
   vehicles.forEach(v => {
     (v.equipments || []).forEach(eq => {
@@ -684,7 +684,7 @@ export const generateVehicleDossierPDF = (
     let statusLabel = 'Calibrado';
     if (eq.nextCalibrationDate) {
       const expDate = new Date(eq.nextCalibrationDate);
-      const refDate = new Date('2026-09-25T12:00:00Z');
+      const refDate = new Date();
       const diffDays = Math.ceil((expDate.getTime() - refDate.getTime()) / (1000 * 60 * 60 * 24));
       if (diffDays < 0) {
         statusLabel = 'VENCIDO';
@@ -767,7 +767,7 @@ export const generateVehicleDossierPDF = (
     }
 
     const expDate = new Date(docItem.expiryDate);
-    const refDate = new Date('2026-09-02T12:00:00Z');
+    const refDate = new Date();
     const diffDays = Math.ceil((expDate.getTime() - refDate.getTime()) / (1000 * 60 * 60 * 24));
 
     let statusText = 'Válido';

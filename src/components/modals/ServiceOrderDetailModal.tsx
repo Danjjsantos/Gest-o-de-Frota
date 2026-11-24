@@ -354,7 +354,7 @@ export const ServiceOrderDetailModal: React.FC<ServiceOrderDetailModalProps> = (
                   {os.status === 'Encerrada' ? (
                     <div>
                       <p className="font-bold text-slate-900 text-xs">
-                        {os.closedByName || os.openedByName || 'Daniel Santos'}
+                        {os.closedByName || os.openedByName || 'Sistema'}
                       </p>
                       <p className="text-[11px] text-slate-600 font-medium flex items-center justify-between mt-0.5">
                         <span>{os.closedByRole || os.openedByRole || 'Gestão / Motorista'}</span>

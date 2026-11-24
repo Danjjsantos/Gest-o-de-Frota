@@ -485,10 +485,7 @@ export const FleetView: React.FC<FleetViewProps> = ({
       );
     }
 
-    // In the screenshot:
-    // Some carretas (like 0379, 0380) have warm yellow/amber box
-    // Others (like 9156, 1181) and cavalos (2554, 2548, 2547, 2541) have soft sky-blue box
-    const isAmberCarreta = vehicle.type === 'Carreta' && (vehicle.fleetNumber === '0379' || vehicle.fleetNumber === '0380' || vehicle.fleetNumber.endsWith('9') || vehicle.fleetNumber.endsWith('0'));
+    const isAmberCarreta = vehicle.type === 'Carreta' && (vehicle.fleetNumber.endsWith('9') || vehicle.fleetNumber.endsWith('0'));
 
     if (isAmberCarreta) {
       return (

@@ -28,16 +28,15 @@ export const Header: React.FC<HeaderProps> = ({
     return 'Boa noite';
   };
 
-  const defaultTitle = `${getGreeting()}, ${currentUser?.name.split(' ')[0] || 'Daniel'}!`;
+  const defaultTitle = `${getGreeting()}, ${currentUser?.name.split(' ')[0] || 'Usuário'}!`;
   const defaultSubtitle = 'Visão geral da frota';
 
-  // Date formatting matching screenshot: "quarta-feira, 2 de setembro de 2026"
   const formattedDate = new Intl.DateTimeFormat('pt-BR', {
     weekday: 'long',
     day: 'numeric',
     month: 'long',
     year: 'numeric'
-  }).format(new Date('2026-09-02T19:30:00'));
+  }).format(new Date());
 
   return (
     <header className="px-8 py-6 bg-white border-b border-slate-200/80 flex flex-col md:flex-row md:items-center md:justify-between gap-4">

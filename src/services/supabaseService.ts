@@ -131,7 +131,7 @@ export function parseTimestampToIso(val: any): string | null {
   return isNaN(d.getTime()) ? null : d.toISOString();
 }
 
-export function formatIsoToBrDate(val: any, fallback = '14/07/2026'): string {
+export function formatIsoToBrDate(val: any, fallback = ''): string {
   if (!val) return fallback;
   const str = String(val).trim();
   if (/^\d{2}\/\d{2}\/\d{4}$/.test(str)) return str;
@@ -374,7 +374,7 @@ export function toFrontendUser(row: any): User {
     cnhNumber: row.cnh_number || undefined,
     cnhCategory: row.cnh_category || undefined,
     avatarColor: row.avatar_color || '#3b82f6',
-    createdAt: formatIsoToBrDate(row.created_at, '14/07/2026')
+    createdAt: formatIsoToBrDate(row.created_at, '')
   };
 }
 
@@ -793,7 +793,7 @@ export class SupabaseService {
               expiryDate: a.expiry_date || undefined,
               notes: a.notes || undefined,
               uploadedBy: a.uploaded_by || 'Sistema',
-              uploadedAt: a.uploaded_at ? formatIsoToBrDate(a.uploaded_at) : '15/07/2026'
+              uploadedAt: a.uploaded_at ? formatIsoToBrDate(a.uploaded_at) : ''
             }
           ])
         );

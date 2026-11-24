@@ -269,7 +269,7 @@ export const VehicleDetailModal: React.FC<VehicleDetailModalProps> = ({
     }
 
     const expDate = new Date(doc.expiryDate);
-    const refDate = new Date('2026-09-02T12:00:00Z');
+    const refDate = new Date();
     const diffDays = Math.ceil((expDate.getTime() - refDate.getTime()) / (1000 * 60 * 60 * 24));
 
     if (diffDays < 0) {

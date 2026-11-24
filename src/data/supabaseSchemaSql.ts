@@ -240,7 +240,7 @@ CREATE TABLE IF NOT EXISTS public.notification_settings (
 );
 
 INSERT INTO public.notification_settings (id, sender_email, days_threshold, auto_email_on_new_os, auto_email_on_expiring_doc, recipients_list, critical_days_threshold, sound_alert_enabled, popup_alert_enabled, browser_push_enabled)
-VALUES ('default', 'notificacoes@gestaofrotas.com.br', 30, TRUE, TRUE, '["danjs23@gmail.com", "helio.knapp@agblogistica.com"]'::jsonb, 7, TRUE, TRUE, FALSE)
+VALUES ('default', 'notificacoes@gestaofrotas.com.br', 30, TRUE, TRUE, '[]'::jsonb, 7, TRUE, TRUE, FALSE)
 ON CONFLICT (id) DO NOTHING;
 
 -- ---------------------------------------------------------------------

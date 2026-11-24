@@ -16,10 +16,6 @@ import {
   DirectedUserTarget
 } from '../types';
 import { 
-  INITIAL_USERS, 
-  INITIAL_VEHICLES, 
-  INITIAL_SERVICE_ORDERS, 
-  INITIAL_NOTIFICATIONS, 
   INITIAL_SETTINGS 
 } from '../data/initialData';
 import { getAutoDirectedUsers, AutoDirectedResult } from '../utils/osAssignment';
@@ -56,6 +52,7 @@ interface FleetContextType {
   currentUser: User | null;
   isAuthenticated: boolean;
   login: (email: string, password?: string, skipPasswordCheck?: boolean) => { success: boolean; error?: string };
+  registerFirstAdmin: (data: { name: string; email: string; phone?: string; password: string }) => { success: boolean; error?: string };
   logout: () => void;
   switchUser: (userId: string) => void;
   syncSupabaseNow: () => Promise<{ success: boolean; message: string }>;
@@ -222,12 +219,12 @@ interface FleetContextType {
 
 const FleetContext = createContext<FleetContextType | undefined>(undefined);
 
-const REFERENCE_DATE = new Date('2026-09-02T12:00:00Z'); // Fixed reference date from screenshots
-
 export const getDaysDifference = (targetDateStr: string): number => {
   if (!targetDateStr) return 9999;
+  const now = new Date();
+  const refDate = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 12, 0, 0));
   const target = new Date(targetDateStr.includes('T') ? targetDateStr : `${targetDateStr}T12:00:00Z`);
-  const diffMs = target.getTime() - REFERENCE_DATE.getTime();
+  const diffMs = target.getTime() - refDate.getTime();
   return Math.ceil(diffMs / (1000 * 60 * 60 * 24));
 };
 
@@ -322,60 +319,28 @@ export const addDeletedServiceOrderId = (id: string) => {
   } catch {}
 };
 
-// Helper to ensure all vehicles have valid documents, equipments, attachments and cargo products
-const enrichVehicleCargoProducts = (v: Vehicle): Vehicle => {
-  const updated: Vehicle = {
-    ...v,
-    documents: v.documents || ({} as any),
-    equipments: Array.isArray(v.equipments) ? v.equipments : [],
-    attachments: Array.isArray(v.attachments) ? v.attachments : [],
-  };
-
-  if (updated.type === 'Cavalo Mecânico') return updated;
-
-  if (!updated.cargoProducts || updated.cargoProducts.length === 0) {
-    if (updated.cargoProduct) {
-      updated.cargoProducts = [updated.cargoProduct as any];
-    } else {
-      const isCO2 = v.fleetNumber === '0379' || v.fleetNumber === '0380' || v.fleetNumber === '0139' || v.fleetNumber === '1364' || v.fleetNumber === '0219' || v.fleetNumber === '0415';
-      const assigned = isCO2 ? ['CO2'] : ['Gases do Ar (LO2, LN2, LAR)'];
-      updated.cargoProducts = assigned as any;
-      updated.cargoProduct = assigned.join(', ');
-    }
-  }
-
-  // Se carrega Gases do Ar e ainda não possui vácuo medido no cache local ou tem data antiga
-  const isGases = Boolean(
-    (Array.isArray(updated.cargoProducts) && updated.cargoProducts.some(p => typeof p === 'string' && (p.includes('Gases do Ar') || p.includes('LO2') || p.includes('LN2') || p.includes('LAR')))) ||
-    (typeof updated.cargoProduct === 'string' && (updated.cargoProduct.includes('Gases do Ar') || updated.cargoProduct.includes('LO2') || updated.cargoProduct.includes('LN2') || updated.cargoProduct.includes('LAR')))
-  );
-
-  if (isGases) {
-    const init = INITIAL_VEHICLES.find(iv => iv.id === v.id || iv.fleetNumber === v.fleetNumber);
-    if (init && init.vacuumValue && (updated.vacuumValue == null || updated.vacuumValue === '')) {
-      updated.vacuumValue = init.vacuumValue;
-      updated.vacuumDate = init.vacuumDate;
-      updated.vacuumUnit = 'mtorr';
-    }
-    // Sincronizar data para o mês corrente de Outubro/2026 caso estivesse em mês anterior
-    if (init && init.vacuumDate && updated.vacuumDate && !updated.vacuumDate.startsWith('2026-10')) {
-      updated.vacuumDate = init.vacuumDate;
-    }
-  }
-
-  return updated;
-};
+// Helper to ensure vehicle collections exist without injecting any unregistered/demo fields
+const normalizeVehicle = (v: Vehicle): Vehicle => ({
+  ...v,
+  documents: v.documents || ({} as any),
+  equipments: Array.isArray(v.equipments) ? v.equipments : [],
+  attachments: Array.isArray(v.attachments) ? v.attachments : [],
+});
 
 export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  // Initialize with localStorage persistence
+  // Initialize with localStorage persistence (no demo users)
   const [users, setUsers] = useState<User[]>(() => {
-    const saved = localStorage.getItem('gestao_frotas_users');
-    const rawList: User[] = saved ? JSON.parse(saved) : INITIAL_USERS;
-    const sanitized = rawList.map(sanitizeUserAtribuicoes);
-    if (saved) {
-      localStorage.setItem('gestao_frotas_users', JSON.stringify(sanitized));
+    try {
+      const saved = localStorage.getItem('gestao_frotas_users');
+      const rawList: User[] = saved ? JSON.parse(saved) : [];
+      const sanitized = Array.isArray(rawList) ? rawList.map(sanitizeUserAtribuicoes) : [];
+      if (saved) {
+        localStorage.setItem('gestao_frotas_users', JSON.stringify(sanitized));
+      }
+      return sanitized;
+    } catch {
+      return [];
     }
-    return sanitized;
   });
 
   const [currentUser, setCurrentUser] = useState<User | null>(() => {
@@ -384,8 +349,14 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     if (!isSessionAuth) return null;
     const savedId = sessionStorage.getItem('gestao_frotas_current_user_id') || localStorage.getItem('gestao_frotas_current_user_id');
     if (!savedId) return null;
-    const found = INITIAL_USERS.find(u => u.id === savedId);
-    return found ? sanitizeUserAtribuicoes(found) : null;
+    try {
+      const savedUsers = localStorage.getItem('gestao_frotas_users');
+      const parsedUsers: User[] = savedUsers ? JSON.parse(savedUsers) : [];
+      const found = parsedUsers.find(u => u.id === savedId);
+      return found ? sanitizeUserAtribuicoes(found) : null;
+    } catch {
+      return null;
+    }
   });
 
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
@@ -398,11 +369,12 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const deletedEqIds = getDeletedEquipmentIds();
     const deletedAttIds = getDeletedAttachmentIds();
 
-    let rawList: Vehicle[] = INITIAL_VEHICLES;
+    let rawList: Vehicle[] = [];
     try {
       const saved = localStorage.getItem('gestao_frotas_vehicles');
       if (saved) {
-        rawList = JSON.parse(saved);
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) rawList = parsed;
       }
     } catch {}
 
@@ -436,33 +408,43 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       attachments: (v.attachments || []).filter(a => !deletedAttIds.has(a.id)),
     }));
 
-    return rawList.map(enrichVehicleCargoProducts);
+    return rawList.map(normalizeVehicle);
   });
 
 
   const [serviceOrders, setServiceOrders] = useState<ServiceOrder[]>(() => {
     const deletedSoIds = getDeletedServiceOrderIds();
-    const saved = localStorage.getItem('gestao_frotas_os');
-    const rawList: ServiceOrder[] = saved ? JSON.parse(saved) : INITIAL_SERVICE_ORDERS;
-    return rawList
-      .filter(os => !deletedSoIds.has(os.id))
-      .map(os => {
-        if (!os.directedUserIds || os.directedUserIds.length === 0) {
-          const auto = getAutoDirectedUsers(os.category, INITIAL_USERS);
-          return {
-            ...os,
-            directedUsers: auto.directedTargets,
-            directedUserIds: auto.allDirectedUsers.map(u => u.id),
-            directedRoles: Array.from(new Set(auto.allDirectedUsers.map(u => u.role))),
-          };
-        }
-        return os;
-      });
+    try {
+      const saved = localStorage.getItem('gestao_frotas_os');
+      const rawList: ServiceOrder[] = saved ? JSON.parse(saved) : [];
+      const savedUsersStr = localStorage.getItem('gestao_frotas_users');
+      const savedUsers: User[] = savedUsersStr ? JSON.parse(savedUsersStr) : [];
+      return (Array.isArray(rawList) ? rawList : [])
+        .filter(os => !deletedSoIds.has(os.id))
+        .map(os => {
+          if ((!os.directedUserIds || os.directedUserIds.length === 0) && savedUsers.length > 0) {
+            const auto = getAutoDirectedUsers(os.category, savedUsers);
+            return {
+              ...os,
+              directedUsers: auto.directedTargets,
+              directedUserIds: auto.allDirectedUsers.map(u => u.id),
+              directedRoles: Array.from(new Set(auto.allDirectedUsers.map(u => u.role))),
+            };
+          }
+          return os;
+        });
+    } catch {
+      return [];
+    }
   });
 
   const [notifications, setNotifications] = useState<SystemNotification[]>(() => {
-    const saved = localStorage.getItem('gestao_frotas_notifications');
-    return saved ? JSON.parse(saved) : INITIAL_NOTIFICATIONS;
+    try {
+      const saved = localStorage.getItem('gestao_frotas_notifications');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
   });
 
   const [settings, setSettings] = useState<NotificationSettings>(() => {
@@ -522,7 +504,7 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                   attachments: (local.attachments || []).filter(a => !deletedAttIds.has(a.id)),
                 };
               }
-              const enriched = enrichVehicleCargoProducts(idbMatch);
+              const enriched = normalizeVehicle(idbMatch);
 
               // Merge equipments: retain existing ones without deleted, fill missing fileUrl/dataUrl
               const mergedEqs = (local.equipments || [])
@@ -579,7 +561,7 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           const prevIds = new Set(prev.map(p => p.id));
           const missingVehicles = idbVehicles
             .filter(iv => !prevIds.has(iv.id) && !deletedVehIds.has(iv.id))
-            .map(enrichVehicleCargoProducts)
+            .map(normalizeVehicle)
             .map(v => ({
               ...v,
               equipments: (v.equipments || []).filter(e => !deletedEqIds.has(e.id)),
@@ -622,6 +604,16 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       localStorage.setItem('gestao_frotas_current_user_id', currentUser.id);
     }
   }, [currentUser]);
+
+  useEffect(() => {
+    if (isAuthenticated && !currentUser && users.length > 0) {
+      const savedId = sessionStorage.getItem('gestao_frotas_current_user_id') || localStorage.getItem('gestao_frotas_current_user_id');
+      if (savedId) {
+        const found = users.find(u => u.id === savedId);
+        if (found) setCurrentUser(sanitizeUserAtribuicoes(found));
+      }
+    }
+  }, [isAuthenticated, currentUser, users]);
 
   // Automatic verification function for all documents (CRLV, CIV, CIPP, Tacógrafo)
   // and all equipments added to fleet with dates
@@ -848,7 +840,7 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       if (remote.vehicles && remote.vehicles.length > 0) {
         const remoteClean = remote.vehicles
           .filter(rv => !deletedVehIds.has(rv.id))
-          .map(enrichVehicleCargoProducts);
+          .map(normalizeVehicle);
 
         const remoteMap = new Map(remoteClean.map(rv => [rv.id, rv]));
 
@@ -940,9 +932,6 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           saveVehiclesToIdb(finalVehicles);
           return finalVehicles;
         });
-      } else if (isInitial && !SupabaseService.isRestricted()) {
-        // Se o banco estiver vazio na primeira execução, popula com os dados atuais
-        SupabaseService.pushAll(vehicles, serviceOrders, users, notifications).catch(() => {});
       }
 
       // 3. Mesclagem inteligente bi-direcional de Ordens de Serviço
@@ -1008,10 +997,10 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const config = getSupabaseConfig();
     if (!config.isConfigured) return;
 
-    // 1. Carga inicial após breve pausa para garantir que o IndexedDB já carregou os arquivos completos locais
+    // 1. Carga inicial rápida após montar (traz apenas dados reais cadastrados no Supabase)
     const initialTimer = setTimeout(() => {
       if (isMounted) executeAutoSync(true);
-    }, 2500);
+    }, 300);
 
     // 2. Inscrição em tempo real (Supabase Realtime WebSockets)
     const unsubscribe = SupabaseService.subscribeToChanges({
@@ -1022,7 +1011,7 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         const deletedAttIds = getDeletedAttachmentIds();
 
         if ((event === 'INSERT' || event === 'UPDATE') && payload.new) {
-          const veh = enrichVehicleCargoProducts(toFrontendVehicle(payload.new));
+          const veh = normalizeVehicle(toFrontendVehicle(payload.new));
           if (deletedVehIds.has(veh.id)) {
             SupabaseService.deleteVehicle(veh.id).catch(() => {});
             return;
@@ -1200,6 +1189,47 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return { success: true };
   };
 
+  const registerFirstAdmin = (data: { name: string; email: string; phone?: string; password: string }): { success: boolean; error?: string } => {
+    const name = data.name.trim();
+    const email = data.email.trim().toLowerCase();
+    const password = data.password.trim();
+    const phone = (data.phone || '').trim();
+
+    if (!name || !email) {
+      return { success: false, error: 'Informe nome completo e e-mail do administrador.' };
+    }
+    if (password.length < 4) {
+      return { success: false, error: 'A senha deve ter pelo menos 4 caracteres.' };
+    }
+
+    const newAdmin: User = sanitizeUserAtribuicoes({
+      id: `user-${Date.now()}`,
+      name,
+      email,
+      phone,
+      password,
+      role: 'Administrador',
+      atribuicoes: ['Gestão Geral'],
+      createdAt: new Date().toLocaleDateString('pt-BR'),
+      avatarColor: '#f97316',
+    });
+
+    setUsers(prev => [newAdmin, ...prev]);
+    setCurrentUser(newAdmin);
+    setIsAuthenticated(true);
+    sessionStorage.setItem('gestao_frotas_session_auth', 'true');
+    sessionStorage.setItem('gestao_frotas_current_user_id', newAdmin.id);
+    localStorage.setItem('gestao_frotas_current_user_id', newAdmin.id);
+
+    if (!SupabaseService.isRestricted()) {
+      SupabaseService.upsertUser(newAdmin).catch(err => {
+        console.debug('Aviso ao salvar administrador inicial no Supabase:', err?.message);
+      });
+    }
+
+    return { success: true };
+  };
+
   const logout = () => {
     setIsAuthenticated(false);
     setCurrentUser(null);
@@ -1373,8 +1403,7 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setVehicles(prev => {
       const updated = prev.map(v => {
         if (v.id !== vehicleId) return v;
-        const targetDate = new Date(expiryDate);
-        const diffDays = Math.ceil((targetDate.getTime() - REFERENCE_DATE.getTime()) / (1000 * 60 * 60 * 24));
+        const diffDays = getDaysDifference(expiryDate);
         
         let status: 'valid' | 'expiring' | 'expired' = 'valid';
         if (diffDays < 0) {
@@ -1425,8 +1454,7 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         if (v.id !== vehicleId) return v;
         const existingDoc = v.documents[docType];
         const effectiveExpiry = data.expiryDate || existingDoc?.expiryDate || '';
-        const targetDate = new Date(effectiveExpiry);
-        const diffDays = Math.ceil((targetDate.getTime() - REFERENCE_DATE.getTime()) / (1000 * 60 * 60 * 24));
+        const diffDays = getDaysDifference(effectiveExpiry);
         
         let status: 'valid' | 'expiring' | 'expired' = 'valid';
         if (diffDays < 0) {
@@ -2416,6 +2444,7 @@ export const FleetProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       currentUser,
       isAuthenticated,
       login,
+      registerFirstAdmin,
       logout,
       switchUser,
       users,

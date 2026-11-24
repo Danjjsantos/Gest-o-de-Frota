@@ -15,7 +15,6 @@ import {
 } from 'lucide-react';
 import { useFleet } from '../../context/FleetContext';
 import { User } from '../../types';
-import { INITIAL_USERS } from '../../data/initialData';
 import { emailService } from '../../services/emailService';
 import { whatsappService } from '../../services/whatsappService';
 import { getSupabaseClient } from '../../services/supabaseClient';
@@ -109,8 +108,7 @@ export const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({
 
       // Check if initial identifier matches any user
       if (initialIdentifier) {
-        const allCandidates = [...users, ...INITIAL_USERS];
-        const match = findUser(initialIdentifier, allCandidates);
+        const match = findUser(initialIdentifier, users);
         if (match) {
           setTargetUser(match);
           setChannel(initialIdentifier.includes('@') ? 'email' : (match.phone ? 'whatsapp' : 'email'));
@@ -169,8 +167,7 @@ export const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({
       return;
     }
 
-    const allCandidates = [...users, ...INITIAL_USERS];
-    const match = findUser(clean, allCandidates);
+    const match = findUser(clean, users);
     if (match) {
       setTargetUser(match);
       if (clean.includes('@')) {
@@ -194,7 +191,7 @@ export const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({
 
     setIsSendingCode(true);
 
-    let found = targetUser || findUser(cleanIdentifier, [...users, ...INITIAL_USERS]);
+    let found = targetUser || findUser(cleanIdentifier, users);
 
     // If still not found, check directly on Supabase database in real-time
     if (!found) {
@@ -380,7 +377,7 @@ export const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({
                     type="text"
                     value={identifier}
                     onChange={(e) => handleIdentifierChange(e.target.value)}
-                    placeholder="Ex: danjs23@gmail.com ou (11) 98765-4321"
+                    placeholder="Ex: seu.email@empresa.com ou (11) 90000-0000"
                     className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm text-black placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-[#ff5500] focus:bg-white transition"
                     autoFocus
                     required
